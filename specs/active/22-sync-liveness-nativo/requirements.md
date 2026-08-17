@@ -15,7 +15,7 @@ En **nativo** el sync-DOWN de PowerSync no fluye durante la sesión viva (los ca
 **Fuera de alcance (explícito, del context §3 OUT):**
 - **(c) / RC-2** — sostener el overlay hasta que baje la fila synced confirmada: **DIFERIDO** (candidato Gate 1, belt-and-suspenders; a `docs/backlog.md`). Solo se documenta como nota (§9).
 - **(b)** — HTTP streaming / `react-native-fetch-api`: **CONTINGENTE**, solo si la instrumentación muestra que (a) no restablece la descarga. No se especifica.
-- La feature **no toca** schema / RLS / sync-rules (`sync-streams/rafaq.yaml`) / Edge Functions (R22.20). No toca `EstablishmentContext` / `RodeoContext` / `lotes.tsx` (ya migrados por la 21) ni la feature 04/BLE.
+- La feature **no toca** schema / RLS / sync-rules (`sync-streams/mitropero.yaml`) / Edge Functions (R22.20). No toca `EstablishmentContext` / `RodeoContext` / `lotes.tsx` (ya migrados por la 21) ni la feature 04/BLE.
 
 ---
 
@@ -89,7 +89,7 @@ En **nativo** el sync-DOWN de PowerSync no fluye durante la sesión viva (los ca
 
 ## 6. Cliente puro / fronteras (multi-tenancy, offline-first)
 
-**R22.25** — El sistema no deberá modificar ninguna migración, RLS policy, sync rule (`sync-streams/rafaq.yaml`) ni Edge Function: la feature es CLIENTE PURO, verificable con `git diff supabase/ sync-streams/` vacío. Si durante la implementación apareciera necesidad de tocar la frontera de sync, el sistema deberá **parar y reabrir Gate 1** (no continuar).
+**R22.25** — El sistema no deberá modificar ninguna migración, RLS policy, sync rule (`sync-streams/mitropero.yaml`) ni Edge Function: la feature es CLIENTE PURO, verificable con `git diff supabase/ sync-streams/` vacío. Si durante la implementación apareciera necesidad de tocar la frontera de sync, el sistema deberá **parar y reabrir Gate 1** (no continuar).
 
 **R22.26** — El sistema no deberá cambiar qué datos ve el usuario: el set de campos/rodeos/config accesibles se sigue derivando de `auth.uid()` vía `org_scope` + RLS server-side (`has_role_in`), intactos. La reconexión y las watched queries son **liveness / UX de reactividad**, nunca un control de acceso; el cliente nunca hardcodea `establishment_id`.
 

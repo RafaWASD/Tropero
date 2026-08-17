@@ -27,7 +27,7 @@ Capa de **ESTADO** sobre el evento que ya existe. No se reinventa el registro de
   link SEC-TRT-03) + RLS + grants + `revoke execute` (SEC-TRT-04) + **CREATE OR REPLACE de
   `tg_sanitary_events_gating` (0091)** con la exención de las aplicaciones (RTR.2.7). *(0122 es la última as-built
   → 0123 es la próxima; verificado en `supabase/migrations/`.)*
-- **MODIFICAR** `sync-streams/rafaq.yaml` — agregar la stream `ev_treatments` (JOIN-free, scope establishment).
+- **MODIFICAR** `sync-streams/mitropero.yaml` — agregar la stream `ev_treatments` (JOIN-free, scope establishment).
   *(No se deploya desde el archivo: se pega en el dashboard → Validate → Deploy, tras aplicar 0123.)*
 - **CREAR** `supabase/tests/rls/treatments.test.cjs` *(o extender el runner de eventos)* — RLS fail-closed,
   anti-spoof `establishment_id`/`created_by`, anti-IDOR del `treatment_id`, ciclo iniciar/aplicar/finalizar.
@@ -312,7 +312,7 @@ aplicaciones con `treatment_id` no nulo saltan `tg_sanitary_events_gating`). El 
 deriva del `kind` (RTR.2.2): `antibiotico → treatment`, `antiparasitario → deworming`, `otro → other`.
 `product_name` de la aplicación **NOT NULL** → default = `product_name` del tratamiento.
 
-## 3. Sync stream — `sync-streams/rafaq.yaml`
+## 3. Sync stream — `sync-streams/mitropero.yaml`
 
 `treatments` tiene `establishment_id` propio (denormalizado + forzado) → entra al patrón JOIN-free ya probado,
 paridad exacta con `ev_sanitary_events`. `sanitary_events.treatment_id` **no** requiere cambio de stream:

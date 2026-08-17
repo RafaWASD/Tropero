@@ -55,7 +55,7 @@ Los dos contextos raíz (`EstablishmentContext`, `RodeoContext`) y la pantalla `
 
 > Contexto E1: el latch existía justamente para "evitar falsos `active_lost` por downloads parciales". Al re-leer en cada avance de sync hay que garantizar que un estado transitorio no se lea como "perdiste acceso".
 >
-> **Regla de decisión (swap ordenado por el leader, 2026-07-19): EVIDENCIA AFIRMATIVA.** La revocación se concluye a partir de un hecho que se lee —la fila local de rol del propio usuario— y nunca por inferencia de ausencia. La fila propia **nunca desaparece por una revocación**: la stream `self_user_roles` (`sync-streams/rafaq.yaml`) se scopea solo por `user_id`, sin `org_scope` y sin filtro `active`, así que una revocación la deja local con `active = 0`. Queda **eliminada** toda confirmación por ventana temporal o por segunda lectura consecutiva. Fundamento completo en `design.md` §4.
+> **Regla de decisión (swap ordenado por el leader, 2026-07-19): EVIDENCIA AFIRMATIVA.** La revocación se concluye a partir de un hecho que se lee —la fila local de rol del propio usuario— y nunca por inferencia de ausencia. La fila propia **nunca desaparece por una revocación**: la stream `self_user_roles` (`sync-streams/mitropero.yaml`) se scopea solo por `user_id`, sin `org_scope` y sin filtro `active`, así que una revocación la deja local con `active = 0`. Queda **eliminada** toda confirmación por ventana temporal o por segunda lectura consecutiva. Fundamento completo en `design.md` §4.
 
 **R20.12** — El sistema deberá considerar que hubo revocación del campo activo **únicamente** cuando la fila local de rol del usuario para ese establecimiento esté ausente o tenga `active = 0`.
 

@@ -20,7 +20,7 @@
 
 - **RC-2 (diferido)**: `connector.ts:157` (`clearOverlay` en el ACK) y `outbox.ts` (`clearOverlay`/`rollbackOverlay`) **no se tocan** (R22 §9). Es la única pieza que rozaría la frontera outbox↔overlay↔descarga → Gate 1, fuera de alcance.
 - **Feature 21 ya migrada**: `EstablishmentContext`, `RodeoContext`, `lotes.tsx` y las puras de la 20 (`assessDisappearance`, guards de equivalencia, diferimiento D1) **no se tocan** (R22.20).
-- **Frontera de sync**: cero cambios en `supabase/**` y `sync-streams/rafaq.yaml` (R22.25). `buildRodeoConfigQuery` (`local-reads.ts:75`) y `fetchRodeoGating`/`fetchRodeoConfig` **no cambian su SQL ni su lógica** — solo cambia QUIÉN los dispara.
+- **Frontera de sync**: cero cambios en `supabase/**` y `sync-streams/mitropero.yaml` (R22.25). `buildRodeoConfigQuery` (`local-reads.ts:75`) y `fetchRodeoGating`/`fetchRodeoConfig` **no cambian su SQL ni su lógica** — solo cambia QUIÉN los dispara.
 - **Feature 04/BLE**: no se toca.
 
 ---

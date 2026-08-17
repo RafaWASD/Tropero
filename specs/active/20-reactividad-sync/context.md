@@ -11,7 +11,7 @@
 **El backlog lo atribuyó a que PowerSync no reconecta ni re-evalúa buckets. Es falso.** Verificado:
 
 - PowerSync **sí** re-evalúa las parameter queries en caliente para conexiones ya establecidas. Documentado en `docs.powersync.com/architecture/powersync-service`: *"The Service then continuously monitors for buckets that are added or removed... and streams those changes"*. El mecanismo por-checkpoint y por-conexión-viva está descrito en `powersync-ja/powersync-service#200`.
-- `org_scope` (`sync-streams/rafaq.yaml:33`) depende de `user_roles`, que **sí** se replica: la publication es `FOR ALL TABLES` (lo prueba el test `TA.11` de la suite de audit).
+- `org_scope` (`sync-streams/mitropero.yaml:33`) depende de `user_roles`, que **sí** se replica: la publication es `FOR ALL TABLES` (lo prueba el test `TA.11` de la suite de audit).
 - Las 31 streams tienen `auto_subscribe: true` → no falta ninguna suscripción.
 
 **Conclusión**: la fila del campo nuevo **estaba en el SQLite local todo el tiempo**. El bug es de **lectura**, no de sync. Lo que falla es que nadie la vuelve a leer.

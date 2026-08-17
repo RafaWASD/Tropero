@@ -5,8 +5,8 @@
 > | Fase | Estado |
 > |---|---|
 > | 1 — Prosa (docs/specs/CONTEXT/.github) | ✅ **HECHA** (2026-08-16). 66 archivos, 139 ocurrencias. 308 protegidas por ser plomería. |
-> | 2 — Infra de E2E (globals + fixtures) | ⏳ pendiente |
-> | 3 — PowerSync (`rafaq.yaml`) | ⏳ pendiente — **pregunta 5 resuelta, ver abajo** |
+> | 2 — Infra de E2E (globals + fixtures) | ✅ **HECHA** (2026-08-16, `c055e6e`). 96 archivos, 11 globals de window + fixtures. La fila decía `⏳ pendiente` por descuido de esa fase; corregida acá. |
+> | 3 — PowerSync (`rafaq.yaml` → `mitropero.yaml`) | ✅ **HECHA** (2026-08-16). 57 archivos: 145 ocurrencias del literal en 55, más 2 docs editados a criterio. **Sin deploy**: el nombre del archivo fuente es local (el script lo copia a `sync-config.yaml`, que es lo único que ve la instancia). Ver `progress/rebrand-fase3-powersync.md`. |
 > | 4 — GUCs de Postgres | ⏳ pendiente — Gate 1 |
 > | 5 — Headers HTTP | ⏳ pendiente — Gate 1. **Además es lo que hoy tiene el árbol en rojo** |
 > | 6 — Identidad Expo | 🔴 bloqueada por decisiones de Raf (§6.2) |

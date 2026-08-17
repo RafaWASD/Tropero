@@ -215,13 +215,13 @@ Genera el archivo `.txt` importable en SIGSA web para declarar ante SENASA los d
 
 **R14.1** El sistema deberá generar el archivo TXT de forma local (sin internet), leyendo los datos del SQLite local de PowerSync. La generación no deberá requerir un round-trip al servidor.
 
-**R14.2** El sistema deberá registrar la fila en `sigsa_declarations` y en `export_log` vía PowerSync (cola de sync); si el dispositivo está offline, esos inserts quedan en cola y se sincronizan al volver la conexión. Las sync rules de `sigsa_declarations` y `export_log` deberán escopar la sincronización al `establishment_id` donde el usuario tiene rol activo (`org_scope`), usando el patrón JOIN-free del repo (ver `sync-streams/rafaq.yaml`). El `export_log.file_content` (TXT con RFIDs) no deberá sincronizarse más allá del establecimiento del usuario.
+**R14.2** El sistema deberá registrar la fila en `sigsa_declarations` y en `export_log` vía PowerSync (cola de sync); si el dispositivo está offline, esos inserts quedan en cola y se sincronizan al volver la conexión. Las sync rules de `sigsa_declarations` y `export_log` deberán escopar la sincronización al `establishment_id` donde el usuario tiene rol activo (`org_scope`), usando el patrón JOIN-free del repo (ver `sync-streams/mitropero.yaml`). El `export_log.file_content` (TXT con RFIDs) no deberá sincronizarse más allá del establecimiento del usuario.
 
 **R14.3** Mientras el cliente esté offline, el sistema deberá poder mostrar el historial de exports que ya estén sincronizados en el SQLite local.
 
 ### R15. Multi-tenant
 
-**R15.1** Todas las tablas nuevas de esta spec (`breed_catalog`, `sigsa_declarations`, `export_log`) deberán tener `establishment_id` (directo o transitivo) y RLS scoped por `has_role_in(establishment_id)`. El scope de PowerSync para `sigsa_declarations` y `export_log` deberá definirse explícitamente en `sync-streams/rafaq.yaml` usando el `org_scope` estándar del repo (no más amplio).
+**R15.1** Todas las tablas nuevas de esta spec (`breed_catalog`, `sigsa_declarations`, `export_log`) deberán tener `establishment_id` (directo o transitivo) y RLS scoped por `has_role_in(establishment_id)`. El scope de PowerSync para `sigsa_declarations` y `export_log` deberá definirse explícitamente en `sync-streams/mitropero.yaml` usando el `org_scope` estándar del repo (no más amplio).
 
 **R15.2** El sistema deberá garantizar que un usuario no pueda ver ni generar exports de un establecimiento donde no tiene rol activo.
 

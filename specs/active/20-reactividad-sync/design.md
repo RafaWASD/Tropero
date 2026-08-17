@@ -35,7 +35,7 @@ No se toca nada más. En particular **NO** entran: las 5 pantallas focus-only (`
 ### 1.3 Lo que NO cambia
 
 - **Ninguna firma pública de contexto.** `EstablishmentContextValue`, `RodeoContextValue`, `EstablishmentState`, `RodeoState` y `ActiveLostReason` quedan igual. Los 5 llamadores de `refreshEstablishments` y los de `refreshRodeos` no se tocan. `loadMemberships` tampoco cambia de forma (la evidencia afirmativa va en una función nueva, no en su `Result`).
-- **Ninguna migración, ninguna RLS policy, ninguna stream de PowerSync.** La frontera de autorización real (`sync-streams/rafaq.yaml` + RLS) no se roza. El único SQL nuevo es un `SELECT` **local** de una fila que ya está sincronizada.
+- **Ninguna migración, ninguna RLS policy, ninguna stream de PowerSync.** La frontera de autorización real (`sync-streams/mitropero.yaml` + RLS) no se roza. El único SQL nuevo es un `SELECT` **local** de una fila que ya está sincronizada.
 
 ---
 
@@ -128,7 +128,7 @@ Que `lastSyncedAt` solo avanza cuando se aplicó un checkpoint **completo y cons
    `app/node_modules/@powersync/common/lib/client/sync/stream/core-instruction.js:22` → `lastSyncedAt: completeSync?.lastSyncedAt`, donde `completeSync = status.priority_status.find(s => s.priority == FULL_SYNC_PRIORITY)`. No hay ninguna otra ruta que lo escriba (`grep lastSyncedAt` sobre todo `@powersync/*`).
 2. **La semántica de esa entrada es "vista consistente sobre todos los buckets".**
    `SyncStatus.js:111-124` (doc del SDK shipped): *"When a consistent view over all buckets for all priorities up until the given priority is reached, PowerSync makes data from those buckets available"*. Y `SyncStatus.d.ts` sobre `lastSyncedAt`: *"Time that a last sync has **fully completed**"*.
-3. **En miTropero no hay prioridades declaradas.** `sync-streams/rafaq.yaml`: las 31 streams se declaran sin `priority` → todas caen en la prioridad completa. No existe el escenario "PowerSync publicó los buckets de prioridad 1 y todavía no los de 3" que es el único caso documentado de visibilidad parcial.
+3. **En miTropero no hay prioridades declaradas.** `sync-streams/mitropero.yaml`: las 31 streams se declaran sin `priority` → todas caen en la prioridad completa. No existe el escenario "PowerSync publicó los buckets de prioridad 1 y todavía no los de 3" que es el único caso documentado de visibilidad parcial.
 4. **La validación y aplicación del checkpoint no vive en JS.** `@powersync/common@1.53.2` delega el ciclo entero al core Rust (`powersync_control` / `UpdateSyncStatus`); no queda código JS de `sync_local`/checksums (grep vacío sobre `common/lib`). El SDK ni siquiera expone ya la implementación JS (`clientImplementation` está marcada deprecada: *"RUST is the only option"*). No hay, del lado del cliente, un camino que aplique ops sueltas a las tablas de usuario fuera de un checkpoint validado.
 5. **Ordenamiento causal del lado del servicio** (razonamiento, no verificación directa): la fila de `establishments` solo sale del SQLite local cuando el bucket de `est_establishments` se remueve, y eso solo ocurre cuando `org_scope` deja de incluir el campo — es decir, **causado por** el cambio en `user_roles`. El servicio procesa el WAL en orden, así que la remoción del bucket no puede preceder al commit que la origina.
 
@@ -138,7 +138,7 @@ Que `lastSyncedAt` solo avanza cuando se aplicó un checkpoint **completo y cons
 
 #### El hecho que la habilita
 
-`sync-streams/rafaq.yaml` (líneas 71-74):
+`sync-streams/mitropero.yaml` (líneas 71-74):
 
 ```yaml
 self_user_roles:                           # membresías del propio usuario

@@ -235,7 +235,7 @@ function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return d
 // ── Simulación de la FRONTERA WAL (espejo de supabase/tests/sync_streams/run.cjs) ──────────────────
 // La frontera del SYNC STREAM (lo que un device recibiría por PowerSync) NO es la RLS de PostgREST: el
 // WAL replica la tabla base ignorando RLS/views/RPC (ADR-025; sync_streams/run.cjs l.6-9). El contenido
-// de cada stream (sync-streams/rafaq.yaml) ES la frontera. Lo testeamos aplicando el PREDICADO de la
+// de cada stream (sync-streams/mitropero.yaml) ES la frontera. Lo testeamos aplicando el PREDICADO de la
 // stream a mano con el cliente service_role (que BYPASSA la RLS) y el scope de cada actor → el SET de
 // filas que la stream le daría a su device. NO usamos auth.user_id() (no hay sesión PostgREST acá); el
 // equivalente exacto es filtrar user_roles por user_id = <actor> AND active = true.
@@ -248,7 +248,7 @@ async function orgScope(userId) {
 }
 
 // catalogFieldDefSet: el SET de field_definitions que la stream GLOBAL `catalog_field_definitions`
-// emite (rafaq.yaml l.56-59): SELECT * FROM field_definitions WHERE establishment_id IS NULL. Es global
+// emite (mitropero.yaml l.56-59): SELECT * FROM field_definitions WHERE establishment_id IS NULL. Es global
 // (sin scope por actor): el mismo set para TODOS. Devuelve los ids.
 async function catalogFieldDefSet() {
   const { data, error } = await admin
@@ -258,7 +258,7 @@ async function catalogFieldDefSet() {
 }
 
 // customSyncSetIds: el SET de filas de una tabla custom per-establishment que la stream le daría al
-// device de un actor (rafaq.yaml l.229-249): WHERE establishment_id IN org_scope [AND deleted_at IS NULL].
+// device de un actor (mitropero.yaml l.229-249): WHERE establishment_id IN org_scope [AND deleted_at IS NULL].
 // scope vacío → set vacío (un actor sin rol en NINGÚN campo no recibe nada). custom_attributes NO tiene
 // deleted_at propio (current-value, by design) → withDeletedAtFilter=false para esa tabla.
 async function customSyncSetIds(table, scope, { withDeletedAtFilter = true, idCol = 'id' } = {}) {
@@ -471,7 +471,7 @@ test('custom (M5) suite — spec 03', async (t) => {
   });
 
   // ---- (e) FRONTERA WAL: scope del sync stream + catálogo global solo NULL (R13.21) -------
-  // Espejo de sync_streams/run.cjs: aplicamos el PREDICADO de cada stream (rafaq.yaml) a mano con
+  // Espejo de sync_streams/run.cjs: aplicamos el PREDICADO de cada stream (mitropero.yaml) a mano con
   // service_role (bypassa la RLS) → el SET que la stream le daría a cada device. R13.21 es la frontera
   // del WAL (capa distinta de la RLS de PostgREST que cubre el caso (a)/R13.22): el WAL ignora RLS, así
   // que el contenido de la stream ES la barrera. Si las streams custom fueran permisivas (sin el

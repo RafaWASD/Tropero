@@ -26,7 +26,7 @@
 - [x] **T4** — En la misma `0123`: RLS de `treatments` (SELECT/INSERT `has_role_in`; UPDATE `has_role_in` USING +
   WITH CHECK; sin DELETE) + grants (`select,insert,update` a authenticated; `all` a service_role) + `notify
   pgrst`. Cubre: RTR.6.1, RTR.6.2, RTR.6.3, RTR.6.4, RTR.7.1.
-- [x] **T5** — Stream `ev_treatments` en `sync-streams/rafaq.yaml` (JOIN-free, scope establishment,
+- [x] **T5** — Stream `ev_treatments` en `sync-streams/mitropero.yaml` (JOIN-free, scope establishment,
   `deleted_at IS NULL`). Cubre: RTR.7.4.
 - [x] **T6** — Tests RLS (runner Node `supabase/tests/rls/`): (a) usuario sin rol en el campo NO lee/escribe un
   treatment (fail-closed); (b) `establishment_id` se fuerza del perfil aunque el payload mande otro

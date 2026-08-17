@@ -12,7 +12,7 @@
 
 Los 3 consumidores de la feature 20 (`EstablishmentContext`, `RodeoContext`, `lotes.tsx`) pasan de disparar la re-lectura sobre `lastSyncedAt` (señal de sync gruesa, proxy NO determinista del cambio de dato — probado ~90 s+ de lag) a **watched queries reales de PowerSync** que reaccionan al cambio del **SQLite local** (~1,5 s determinista): `db.onChange` imperativo en los 2 contextos (el `onChange` re-corre la resolución que ya existe) y `useQuery` en `lotes.tsx` (la lista se vuelve reactiva). Sin cambiar firmas públicas, sin tocar RLS/streams/migraciones, sin migrar el resto de la app.
 
-**Fuera de alcance (explícito, no negociable)**: las 5 pantallas focus-only del backlog (`miembros`, `use-reports`, `animal/[id]`, `export-sigsa`, `maniobra`) y el resto de la app — se migran después con el patrón ya establecido (ADR-030, migración incremental). La frontera de autorización real (RLS `has_role_in`, streams `sync-streams/rafaq.yaml`) NO se toca. La feature 04/BLE NO se toca.
+**Fuera de alcance (explícito, no negociable)**: las 5 pantallas focus-only del backlog (`miembros`, `use-reports`, `animal/[id]`, `export-sigsa`, `maniobra`) y el resto de la app — se migran después con el patrón ya establecido (ADR-030, migración incremental). La frontera de autorización real (RLS `has_role_in`, streams `sync-streams/mitropero.yaml`) NO se toca. La feature 04/BLE NO se toca.
 
 ---
 
@@ -78,7 +78,7 @@ Los 3 consumidores de la feature 20 (`EstablishmentContext`, `RodeoContext`, `lo
 
 **R21.17** — Cuando la evidencia afirmativa resulte `active` o `unknown` ante una desaparición, el sistema deberá mantener el estado vigente y re-evaluar en el próximo disparo de la watched query, sin introducir ningún temporizador ni contador.
 
-**R21.18** — El sistema deberá apoyar la garantía de R21.16 en que PowerSync aplica cada checkpoint como una transacción consistente sobre el SQLite local (sin prioridades declaradas en `sync-streams/rafaq.yaml`), de modo que ningún disparo de la watched query observe un set de buckets a medio aplicar.
+**R21.18** — El sistema deberá apoyar la garantía de R21.16 en que PowerSync aplica cada checkpoint como una transacción consistente sobre el SQLite local (sin prioridades declaradas en `sync-streams/mitropero.yaml`), de modo que ningún disparo de la watched query observe un set de buckets a medio aplicar.
 
 ---
 

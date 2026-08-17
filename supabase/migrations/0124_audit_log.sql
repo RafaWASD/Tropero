@@ -7,11 +7,11 @@
 --   La spec asumió que la publication de PowerSync era `FOR TABLE <lista>` (puballtables=false). VERIFICADO
 --   en dev (2026-07-13, read-only `pg_publication`): la publication `powersync` es **FOR ALL TABLES**
 --   (puballtables=true). En este proyecto el FRONTIER de sincronización NO es la publication sino las
---   **sync streams** (`sync-streams/rafaq.yaml`): el WAL replica TODA la base al servicio de PowerSync, y
---   cada stream scopea explícitamente qué llega a cada device (ADR-025/026; header de rafaq.yaml). Una tabla
+--   **sync streams** (`sync-streams/mitropero.yaml`): el WAL replica TODA la base al servicio de PowerSync, y
+--   cada stream scopea explícitamente qué llega a cada device (ADR-025/026; header de mitropero.yaml). Una tabla
 --   que NO aparece en ninguna stream (y no hay stream catch-all) nunca llega a un device — mismo mecanismo
 --   que mantiene fuera a `animals`/`users`/`import_log` hoy. Por eso `audit.record_version` NO se agrega a
---   `rafaq.yaml` (R4.2 intent). No se puede excluir del FOR ALL TABLES → residual = costo de WAL menor
+--   `mitropero.yaml` (R4.2 intent). No se puede excluir del FOR ALL TABLES → residual = costo de WAL menor
 --   (INSERT-only, retención 90d). El objetivo de D5 (audit no fuga a devices) SE CUMPLE por el frontier de
 --   streams. Ver progress/impl_18-audit-log.md § "T1 / R4.1 discrepancia" (requiere ratificación de Raf).
 --

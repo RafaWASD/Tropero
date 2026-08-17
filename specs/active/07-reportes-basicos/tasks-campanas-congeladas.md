@@ -70,7 +70,7 @@ sin justificación documentada.
   en el deploy."* Cubre: RCC.1.9.
 
 - [x] **T11 — Cerrar la migración**: `notify pgrst, 'reload schema'; commit;` + cabecera
-  `🔴 NO se aplica al remoto desde acá` (patrón `0105`/`0118`). **No** agregar nada a `sync-streams/rafaq.yaml`.
+  `🔴 NO se aplica al remoto desde acá` (patrón `0105`/`0118`). **No** agregar nada a `sync-streams/mitropero.yaml`.
   Cubre: RCC.1.10.
 
 ## Bloque C — Migración `0128_campaign_snapshots.sql` (② / DL2 / DL4 / F5)
@@ -128,7 +128,7 @@ sin justificación documentada.
   ejecutable por `anon`/`public` → aborta. Sin el loop (2) nadie verifica esa mitad de §5.8 (`0105:237-252`)
   porque el barrido excluye la lista blanca por construcción, y el default de Postgres para una función nueva es
   `EXECUTE` a `PUBLIC` → **`close_campaign` se aplicaría abierta**. + `notify pgrst` + `commit`. **No** agregar
-  nada a `sync-streams/rafaq.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6, RCC.9.6.a.
+  nada a `sync-streams/mitropero.yaml`. Cubre: RCC.4.9, RCC.9.5, RCC.9.6, RCC.9.6.a.
   > **As-built (design §15 R1/R2)**: la lista blanca quedó con **14** entradas (se suman `rodeo_sessions_list`,
   > `rodeo_weight_by_category` e `is_owner_or_vet_of`) y el barrido suma los prefijos `close_%`/`reopen_%`.
   > Sin eso la migración **abortaba** por dos RPC públicas preexistentes que matchean `rodeo_%`. Los
@@ -407,7 +407,7 @@ sin justificación documentada.
 - [x] **T54 — TR.18 denominador**: `entoradas === serviced` y `retired === 0` en todos los escenarios de la suite.
   Cubre: RCC.2.12.
 
-- [x] **T55 — TR.19 guard de ausencia en PowerSync**: leer `sync-streams/rafaq.yaml` y fallar —
+- [x] **T55 — TR.19 guard de ausencia en PowerSync**: leer `sync-streams/mitropero.yaml` y fallar —
   **case-insensitive** — si menciona `rodeo_membership_history`, `rodeo_campaign_snapshots` o
   `rodeo_campaign_snapshot_animals`. Comentario con el borde: no ve una edición manual en el dashboard de
   PowerSync (los deploys van por `scripts/powersync-deploy.sh`, y el header del YAML ya declara eso fuera de

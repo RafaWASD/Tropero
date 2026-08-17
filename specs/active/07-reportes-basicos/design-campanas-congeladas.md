@@ -97,7 +97,7 @@ el remoto es el as-built).
 
 | Archivo | Qué |
 |---|---|
-| `supabase/tests/reports/run.cjs` | **MODIFICAR.** TR.12 (inmutabilidad + los dos contrafactuales), TR.13 (cómputo histórico), TR.14 (authz/grants de lo nuevo), TR.15 (membresía), TR.16 (DL10), TR.17 (regresión tacto sin jornada + guard `session_id`), TR.18 (`entoradas == serviced`), TR.19 (guard de ausencia en `sync-streams/rafaq.yaml`). Extender TR.10 con las funciones nuevas. |
+| `supabase/tests/reports/run.cjs` | **MODIFICAR.** TR.12 (inmutabilidad + los dos contrafactuales), TR.13 (cómputo histórico), TR.14 (authz/grants de lo nuevo), TR.15 (membresía), TR.16 (DL10), TR.17 (regresión tacto sin jornada + guard `session_id`), TR.18 (`entoradas == serviced`), TR.19 (guard de ausencia en `sync-streams/mitropero.yaml`). Extender TR.10 con las funciones nuevas. |
 
 ### Frontend
 
@@ -903,7 +903,7 @@ No se agrega ningún trigger de rechazo (rompería el offline-first). Se testea 
 | **W9** | **Funciones internas no alcanzables por PostgREST.** | `revoke execute … from public, anon, authenticated` sobre **las 7**: `rodeo_campaign_tacto`, `rodeo_campaign_births`, `rodeo_campaign_calves`, `animal_category_at`, `campaign_tacto_bounds`, **`campaign_cycle_complete`**, **`campaign_missing_summary`**. La lista **no se enumera dos veces**: la migración declara una única **lista blanca de lo público** y el smoke-check barre por prefijo todo lo demás (§6-bis), así que una interna nueva nace revocada o la migración muere. Testeado (RCC.13.6). |
 | **W10** | **El trigger es `SECURITY DEFINER set search_path = public`** (molde `0030`) y toma `establishment_id` **de la fila padre**, nunca de un valor del cliente (anti-spoof, ADR-026). |
 | **W11** | **PII**: ninguna tabla nueva guarda PII (ADR-025). `closed_by`/`changed_by` son FK a `users(id)`; el nombre se resuelve por JOIN dentro de una RPC con guard, no se denormaliza. |
-| **W12** | **Superficie de sync**: las 3 tablas quedan **fuera** de `sync-streams/rafaq.yaml` (DL8) → no amplían la frontera del wire ni el bucket count. Guard de ausencia en la suite (RCC.13.10). |
+| **W12** | **Superficie de sync**: las 3 tablas quedan **fuera** de `sync-streams/mitropero.yaml` (DL8) → no amplían la frontera del wire ni el bucket count. Guard de ausencia en la suite (RCC.13.10). |
 
 ### §5.C — Códigos de error (contrato con el cliente)
 
@@ -1270,7 +1270,7 @@ cubrir el invariante por comportamiento sobre un conjunto descubierto, y se decl
 | **TR.16** DL10 | tras cerrar: insertar un `tacto` de la campaña **no falla**; los 5 KPI no se mueven; `rodeo_campaign_status.has_new_data = true`; tras `reopen` + `close`, el KPI **sí** incorpora el dato y hay un snapshot nuevo con el viejo `reopened_at`. | RCC.8.*, RCC.6.5 |
 | **TR.17** regresión | un `tacto` con `session_id = null` sigue contando en preñez/parición/CCL; **guard de clase**: `pg_get_functiondef` de las 7 funciones no contiene `session_id`. | RCC.12.1, RCC.12.2 |
 | **TR.18** denominador | `entoradas === serviced` y `retired === 0` en todos los escenarios. | RCC.2.12 |
-| **TR.19** guard de ausencia | leer `sync-streams/rafaq.yaml` y fallar si menciona `rodeo_membership_history`, `rodeo_campaign_snapshots` o `rodeo_campaign_snapshot_animals`. | RCC.13.10 |
+| **TR.19** guard de ausencia | leer `sync-streams/mitropero.yaml` y fallar si menciona `rodeo_membership_history`, `rodeo_campaign_snapshots` o `rodeo_campaign_snapshot_animals`. | RCC.13.10 |
 | **TR.20** consistencia detalle↔cabecera | por cada bucket, `count(*)` del detalle == el número congelado; y `rodeo_serviced_females` con la campaña cerrada devuelve exactamente `serviced` filas. | RCC.4.7, RCC.7.2 |
 
 El `cleanup()` existente ya borra por `establishment_id` en cascada; las tres tablas nuevas tienen FK a
@@ -1619,7 +1619,7 @@ Puerta 2. Tras correr el capture: revertir `design/**` si el build re-renderizó
 |---|---|---|
 | **L-1** | `P0002` antes del guard = oráculo de existencia de `rodeo_id`. | **Sin cambio**, a propósito: es idéntico al as-built (`0105:103`, `0106:67`), el UUID no es adivinable y `reports.ts` mapea `P0002` y `42501` al mismo `forbidden`. Queda anotado para que nadie lo "arregle" en una sola función y rompa la simetría. |
 | **L-2** | Política de borrado del actor inconsistente: `closed_by`/`reopened_by` con `on delete set null`, `changed_by` de membresía en `NO ACTION` (molde `0030`). | **Se unifica en `on delete set null`** para las tres columnas de actor del delta. Fundamento: derecho de supresión (Ley 25.326) gana sobre conservar el nombre del actor; y el hecho auditado (qué se cerró, cuándo, con qué números) sobrevive igual. Se aparta del molde `0030` a propósito y se dice por qué. |
-| **L-3** | El guard de `rafaq.yaml` es un match de texto case-sensitive. | **Case-insensitive** (RCC.13.10) + queda escrito que no puede ver una edición manual en el dashboard de PowerSync — que el propio header del YAML ya declara fuera de proceso (los deploys van por `scripts/powersync-deploy.sh`). |
+| **L-3** | El guard de `mitropero.yaml` es un match de texto case-sensitive. | **Case-insensitive** (RCC.13.10) + queda escrito que no puede ver una edición manual en el dashboard de PowerSync — que el propio header del YAML ya declara fuera de proceso (los deploys van por `scripts/powersync-deploy.sh`). |
 | **L-4** | `animal_category_at` no tiene guard de tenant; solo la protege el `revoke`. | `comment on function` explícito: *"sin guard a propósito: no es alcanzable por PostgREST. Si alguna vez se le da `grant`, hay que agregarle el guard PRIMERO."* |
 | **L-5** | El `establishment_id` denormalizado de `rodeo_membership_history` puede quedar viejo (el trigger no dispara con `update of establishment_id`). | `comment on column` explícito: *"no es frontera de autorización — la RLS de esta tabla usa `establishment_of_profile()` (DP-19). Puede quedar stale. El día que alguien 'optimice' la policy a `has_role_in(establishment_id)`, primero hay que agregar `establishment_id` a la lista de columnas del trigger."* Hoy es inocuo porque `transfer_animal` crea un perfil nuevo en vez de mover el existente. |
 

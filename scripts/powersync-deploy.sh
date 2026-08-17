@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Deploy de sync streams a PowerSync Cloud, parametrizado por ambiente (spec 16 Run B, B5 / R5.9).
 #
-# Fuente canónica: sync-streams/rafaq.yaml (la audita Gate 1 — NO editar powersync/sync-config.yaml,
+# Fuente canónica: sync-streams/mitropero.yaml (la audita Gate 1 — NO editar powersync/sync-config.yaml,
 # es un artefacto generado por este script y está gitignoreado). El MISMO sync set apunta a la
-# instancia dev o prod según --env (design §Offline-first: PROD reusa rafaq.yaml sin tocarlo).
+# instancia dev o prod según --env (design §Offline-first: PROD reusa mitropero.yaml sin tocarlo).
 #
 # Token: PS_ADMIN_TOKEN por env var (o HKCU\Environment con `setx`). Para prod, PS_ADMIN_TOKEN_PROD si
 # está seteado; si no, PS_ADMIN_TOKEN (el token es de management de TODA la cuenta → sirve para ambas
@@ -73,7 +73,7 @@ if [ "$ENV_ARG" = "prod" ]; then
   echo "PROD: instancia = powersync/cli.prod.yaml (swap temporal de cli.yaml)."
 fi
 
-cp sync-streams/rafaq.yaml powersync/sync-config.yaml
+cp sync-streams/mitropero.yaml powersync/sync-config.yaml
 
 # El `validate` corre un connection-test contra la conexión descrita en powersync/service.yaml LOCAL,
 # que apunta a la DB de DEV. La conexión de PROD NO vive acá: se gestiona (managed) en el dashboard de

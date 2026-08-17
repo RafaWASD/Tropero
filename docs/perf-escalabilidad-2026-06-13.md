@@ -8,7 +8,7 @@
 
 ## 1. Veredicto
 
-- **Escalar a muchos clientes/usuarios (backend)**: bien parado. El sync JOIN-free (ADR-026, `sync-streams/rafaq.yaml`) hace que el bucket count sea **independiente del volumen de datos** — el problema más difícil de un offline-first multi-tenant ya está resuelto. Único agujero concreto: **faltan índices de `establishment_id` en las 6 tablas de eventos** (ver §2/§3). Barato de tapar.
+- **Escalar a muchos clientes/usuarios (backend)**: bien parado. El sync JOIN-free (ADR-026, `sync-streams/mitropero.yaml`) hace que el bucket count sea **independiente del volumen de datos** — el problema más difícil de un offline-first multi-tenant ya está resuelto. Único agujero concreto: **faltan índices de `establishment_id` en las 6 tablas de eventos** (ver §2/§3). Barato de tapar.
 - **Campo grande en teléfono malo (cliente)**: deuda real. **Cero virtualización de listas** en toda la app. No bloquea el beta (un campo, pocos miles de animales), pero es lo primero que se nota al crecer (ver §4).
 - **Primeros meses con clientes reales (beta Chascomús)**: riesgo **bajo**. No se cae. Los riesgos aparecen con campos de muchos miles de animales, import de historial profundo, o gama baja real.
 
@@ -44,7 +44,7 @@ El predicado parcial `WHERE deleted_at IS NULL` espeja exactamente el filtro de 
 ```sql
 -- 0090_event_children_establishment_id_indexes.sql
 -- Índices de establishment_id sobre las tablas hijas denormalizadas en 0077.
--- Las streams (sync-streams/rafaq.yaml) y la RLS filtran por establishment_id sin índice → seq scan a escala.
+-- Las streams (sync-streams/mitropero.yaml) y la RLS filtran por establishment_id sin índice → seq scan a escala.
 -- Predicado parcial = espejo del filtro de la stream/RLS (deleted_at IS NULL) donde aplica.
 
 create index if not exists weight_events_by_est

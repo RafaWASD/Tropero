@@ -88,7 +88,7 @@
   comentario del caso (deja de hablar de "señal congelada / guard `=== 0`"; pasa a "sin cambios de tabla, el
   `onChange` no dispara"). Cubre: R21.22, R21.23. Verificación: E2E T22.
 
-- [x] **T11** — Verificar R21.18 por inspección/argumento: `sync-streams/rafaq.yaml` no declara prioridades
+- [x] **T11** — Verificar R21.18 por inspección/argumento: `sync-streams/mitropero.yaml` no declara prioridades
   → cada checkpoint es una vista consistente → `onChange` no observa buckets a medio aplicar (feature 20
   design §4.2, evidencia 1-4). Cubre: R21.18. Verificación: inspección + referencia a la evidencia de la 20.
 

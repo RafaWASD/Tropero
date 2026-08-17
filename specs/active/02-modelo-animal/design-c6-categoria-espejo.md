@@ -140,7 +140,7 @@ Suite en `animal-category.test.ts`, casos 1:1 con `supabase/tests/animal/run.cjs
 ## 7. Findings para el leader (no se especifican acá — exigen backend)
 
 1. **`is_castrated` no está en el SQLite local**: `animals` está fuera del sync set (b1) y `0079` no lo denormalizó. El context-c6 afirmaba "todos los inputs disponibles localmente" — es falso para este input. Workaround frontend (inferencia RC6.2.1) es correcto **hoy** porque ningún write-path productivo setea `is_castrated=true`. Cuando llegue el toggle de castración (ficha / spec 10), hay que **denormalizar `is_castrated` sobre `animal_profiles`** (migración estilo b1/0079) y pasar el input real al espejo.
-2. **Tabla `animals` muerta en AppSchema**: declarada en `schema.ts` con comentario "llega por est_animals", pero esa stream no existe (`rafaq.yaml` la excluye). Siempre vacía localmente; conviene limpiar la declaración o el comentario (housekeeping de spec 15, no de este chunk).
+2. **Tabla `animals` muerta en AppSchema**: declarada en `schema.ts` con comentario "llega por est_animals", pero esa stream no existe (`mitropero.yaml` la excluye). Siempre vacía localmente; conviene limpiar la declaración o el comentario (housekeeping de spec 15, no de este chunk).
 
 ## 8. Alternativas descartadas
 

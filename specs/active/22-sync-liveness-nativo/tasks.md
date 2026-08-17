@@ -2,7 +2,7 @@
 
 > Orden de implementación. Cada tarea indica el/los archivo(s) que toca, los `R22.<n>` que cubre y **cómo se verifica** (unit / e2e / typecheck / inspección del reviewer / veredicto DEVICE).
 > Convención de verificación: **[WEB]** = automatizable en E2E web; **[DEVICE]** = veredicto en device (ADR-029: sync-down vivo en nativo NO se prueba en web); **[UNIT]** = node:test; **[TYPE]** = typecheck/lint; **[REVIEW]** = inspección de wiring del reviewer.
-> Regla dura: NO tocar `supabase/**` ni `sync-streams/rafaq.yaml` (R22.25). `git diff supabase/ sync-streams/` debe quedar VACÍO al cerrar.
+> Regla dura: NO tocar `supabase/**` ni `sync-streams/mitropero.yaml` (R22.25). `git diff supabase/ sync-streams/` debe quedar VACÍO al cerrar.
 
 ---
 

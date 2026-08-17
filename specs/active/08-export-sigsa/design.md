@@ -488,9 +488,9 @@ Tablas nuevas a agregar al scope de PowerSync:
 
 `breed_catalog` usa el bucket global (mismo patrón que `species`, `categories_by_system` en spec 02).
 
-### Sync rules explícitas para `rafaq.yaml` (MEDIUM-2, Gate 1)
+### Sync rules explícitas para `mitropero.yaml` (MEDIUM-2, Gate 1)
 
-Las sync rules deben definirse explícitamente en `sync-streams/rafaq.yaml` siguiendo el patrón JOIN-free
+Las sync rules deben definirse explícitamente en `sync-streams/mitropero.yaml` siguiendo el patrón JOIN-free
 establecido en spec 15. `sigsa_declarations` y `export_log` contienen datos sensibles (TXT con RFIDs,
 marcadores de declaración SENASA): el scope debe ser **el mismo `org_scope` que las demás tablas
 per-establishment**, no más amplio.
@@ -578,7 +578,7 @@ supabase/migrations/  -- migration 0108 toca animal_profiles (spec 02)
                       -- migration 0110 toca establishments (spec 01)
 supabase/config.toml  -- agregar breed_catalog, sigsa_declarations, export_log al sync scope
 app/src/services/powersync/schema.ts  -- agregar tablas nuevas al schema PowerSync
-sync-streams/rafaq.yaml               -- agregar streams sigsa_breed_catalog, sigsa_declarations, sigsa_export_log (MEDIUM-2)
+sync-streams/mitropero.yaml               -- agregar streams sigsa_breed_catalog, sigsa_declarations, sigsa_export_log (MEDIUM-2)
 ```
 
 ---
@@ -591,7 +591,7 @@ ExportSigsaScreen
     → SigsaExportService.queryPendingAnimals(establishmentId, filters)
       → PowerSync (SQLite local):
           -- ⚠ RECONCILIACIÓN OFFLINE (leader 2026-06-24): la tabla `animals` (global) NO entra al
-          -- sync set de PowerSync (ADR-026 / rafaq.yaml §"Entidades compartidas") → NO está en el
+          -- sync set de PowerSync (ADR-026 / mitropero.yaml §"Entidades compartidas") → NO está en el
           -- SQLite local → un `JOIN animals` rompería la generación offline (viola R14). La identidad
           -- (tag_electronic/sex/birth_date) se lee de las columnas DENORMALIZADAS sobre animal_profiles
           -- (animal_tag_electronic/animal_sex/animal_birth_date, migración 0079, "swap T4"). El query
@@ -666,7 +666,7 @@ Se evaluó agregar directamente `sigsa_declared_at timestamptz` + `sigsa_export_
   - **HIGH-1**: agregados triggers `sigsa_declarations_set_declared_by` (migration 0093) y `export_log_set_generated_by` (migration 0094) que fuerzan `declared_by`/`generated_by = auth.uid()` server-side, ignorando el payload del cliente. Patrón: `tg_force_created_by_auth_uid` (0043) + `tg_force_imported_by_auth_uid` (0073).
   - **HIGH-2**: agregados constraints `export_log_file_content_size_chk` (5 MB, ~138k animales) y `export_log_file_name_len_chk` (255 chars) en la definición de `export_log` (migration 0094). Patrón: 0070 + 0073.
   - **MEDIUM-1**: resuelto "el implementer elige" — se opta por RPC `update_renspa(p_establishment_id, p_renspa)` SECURITY DEFINER con guard `is_owner_of` (migration 0092). La policy existente 0007 ya restringe UPDATE directo a owners; la RPC es la puerta de UI. Patrón: `soft_delete_rodeo` (0041).
-  - **MEDIUM-2**: sync rules explícitas para `sigsa_declarations`, `export_log` y `breed_catalog` en `sync-streams/rafaq.yaml` siguiendo el patrón JOIN-free del repo. Scope: `org_scope` estándar (establishment_id IN user_roles activos). `file_content` no sobre-sincroniza a campos ajenos.
+  - **MEDIUM-2**: sync rules explícitas para `sigsa_declarations`, `export_log` y `breed_catalog` en `sync-streams/mitropero.yaml` siguiendo el patrón JOIN-free del repo. Scope: `org_scope` estándar (establishment_id IN user_roles activos). `file_content` no sobre-sincroniza a campos ajenos.
   - **MEDIUM-4**: WITH CHECK de `sigsa_declarations_insert` endurecido con EXISTS que verifica que `animal_profile_id` pertenece al `establishment_id` de la fila (previene IDOR cross-tenant).
   - **MEDIUM-3**: resuelto en tasks.md (test de guard de rol en T19) — no requería cambio de design.
 - **2026-06-24 — Cierre de las 4 decisiones abiertas + renumeración de migraciones (leader, terminal dueña)**:

@@ -10,9 +10,9 @@ dashboard: los deploys de sync streams se hacen con `bash scripts/powersync-depl
 |---|---|---|
 | `cli.yaml` | Link a la instancia (org/project/instance IDs, no secretos) | committeado |
 | `service.yaml` | Config del service (conexión de replicación, client auth). La password de la DB queda como `secret_ref` server-side — **no hay secretos en texto plano** | committeado |
-| `sync-config.yaml` | **Artefacto generado** — el deploy script lo copia de `sync-streams/rafaq.yaml` | gitignoreado |
+| `sync-config.yaml` | **Artefacto generado** — el deploy script lo copia de `sync-streams/mitropero.yaml` | gitignoreado |
 
-**La fuente canónica de las sync streams es `sync-streams/rafaq.yaml`** (la audita Gate 1; la
+**La fuente canónica de las sync streams es `sync-streams/mitropero.yaml`** (la audita Gate 1; la
 referencian specs y tests). No editar `sync-config.yaml` a mano.
 
 ## Deploy
@@ -22,7 +22,7 @@ bash scripts/powersync-deploy.sh                  # valida + deploya
 bash scripts/powersync-deploy.sh --validate-only  # solo valida
 ```
 
-El script copia `sync-streams/rafaq.yaml` → `sync-config.yaml`, corre `powersync validate`
+El script copia `sync-streams/mitropero.yaml` → `sync-config.yaml`, corre `powersync validate`
 (schema + test de conexión + sync config contra la instancia) y después `powersync deploy sync-config`
 (deploya SOLO sync streams, no toca la config del service).
 
@@ -49,7 +49,7 @@ El token es de management de TODA la cuenta — no committearlo nunca; se revoca
   `cli.yaml`. Conexión → `db.xrhlxxdnfzvdnztacofj.supabase.co`.
 - **Production** (`6a260fd10ef84ed6719fd6bf`): **provisionada y replicando** (Run F, 2026-07-16).
   Conexión → `db.bcrsgekkfcdpwvkebsqe.supabase.co` (`Status: connected`, initial replication done,
-  lag 0). Sync streams canónicas (`rafaq.yaml`) deployadas. Linkeada por `cli.prod.yaml`; deploy con
+  lag 0). Sync streams canónicas (`mitropero.yaml`) deployadas. Linkeada por `cli.prod.yaml`; deploy con
   `bash scripts/powersync-deploy.sh --env prod` (exige `RAFAQ_CONFIRM_PROD=1`).
 
 ### `--env prod` saltea el connection-test de `validate` (a propósito)

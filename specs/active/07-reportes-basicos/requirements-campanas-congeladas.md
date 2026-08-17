@@ -77,7 +77,7 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.1.9** — El sistema deberá documentar en el `design.md` y en el comentario SQL de la tabla que el backfill
   **asume que ningún perfil se movió de rodeo antes del deploy** y que, por lo tanto, la historia previa de los
   animales efectivamente movidos es **falsa**; el historial fiel empieza a acumularse desde el deploy.
-- **RCC.1.10** — El sistema no deberá agregar `rodeo_membership_history` a `sync-streams/rafaq.yaml` (no sincroniza
+- **RCC.1.10** — El sistema no deberá agregar `rodeo_membership_history` a `sync-streams/mitropero.yaml` (no sincroniza
   a los devices).
 - **RCC.1.11** — El sistema deberá exponer `rodeo_membership_history` con RLS de solo lectura para los roles activos
   del establecimiento y no deberá otorgar `insert`/`update`/`delete` a `authenticated` (las filas las escribe
@@ -178,7 +178,7 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.4.8.b** — El sistema deberá garantizar **estructuralmente** que el `establishment_id` de una fila de detalle
   sea igual al de su snapshot padre, mediante una clave foránea compuesta `(snapshot_id, establishment_id)` contra
   una clave única `(id, establishment_id)` de la cabecera.
-- **RCC.4.9** — El sistema no deberá agregar las tablas de snapshot a `sync-streams/rafaq.yaml`.
+- **RCC.4.9** — El sistema no deberá agregar las tablas de snapshot a `sync-streams/mitropero.yaml`.
 - **RCC.4.10** — El sistema deberá impedir que exista más de un snapshot **vigente** (no reabierto) por
   `(rodeo_id, campaign_year)`.
 - **RCC.4.11** — Cuando una campaña se cierra con el ciclo incompleto, el sistema deberá persistir en el snapshot
@@ -519,7 +519,7 @@ detalle y fundamento en `design-campanas-congeladas.md` §0.3):
 - **RCC.13.9.c** — El sistema deberá incluir un test de que el predicado de "ciclo completo" que usa
   `close_campaign` y el que devuelve `rodeo_campaign_status` coinciden en el mismo escenario.
 - **RCC.13.10** — El sistema deberá incluir un guard **case-insensitive** que falle si `rodeo_membership_history`,
-  `rodeo_campaign_snapshots` o `rodeo_campaign_snapshot_animals` aparecen en `sync-streams/rafaq.yaml`.
+  `rodeo_campaign_snapshots` o `rodeo_campaign_snapshot_animals` aparecen en `sync-streams/mitropero.yaml`.
 - **RCC.13.13** — El sistema deberá incluir un test de que apuntar el `rodeo_id` de un perfil a un rodeo de otro
   establecimiento es rechazado por la base con `23514`, de modo que `rodeo_membership_history.rodeo_id` nunca pueda
   contener un par perfil/rodeo cruzado entre establecimientos.

@@ -14,7 +14,7 @@
 -- 🔴 NO se aplica al remoto desde acá: la aplica el LEADER por Supabase MCP tras Gate 1 (PASS) + reviewer
 -- (APPROVED) + Gate 2 (PASS) + Gate 2.5 + OK explícito de Raf. Entre 0127 y 0130 la suite
 -- supabase/tests/reports/run.cjs queda ROJA-HASTA-APPLY — ESPERADO (patrón 0075-0082 / 0093-0097 / 0105-0106).
--- **No** se agrega nada a `sync-streams/rafaq.yaml` (DL8 / RCC.1.10): esta tabla NO sincroniza a los devices.
+-- **No** se agrega nada a `sync-streams/mitropero.yaml` (DL8 / RCC.1.10): esta tabla NO sincroniza a los devices.
 
 begin;
 
@@ -60,11 +60,11 @@ comment on table public.rodeo_membership_history is
   'TABLES** (verificado en `pg_publication`, igual que declara la cabecera de 0124) y el pg_default_acl le da '
   '`SELECT` a `powersync_role`, así que las filas de esta tabla **SÍ cruzan al slot de replicación** — no se '
   'puede excluir una tabla de un FOR ALL TABLES. Lo que las mantiene fuera de los DEVICES es la capa de '
-  '**sync streams** (`sync-streams/rafaq.yaml`): no hay stream catch-all, así que una tabla que ninguna '
+  '**sync streams** (`sync-streams/mitropero.yaml`): no hay stream catch-all, así que una tabla que ninguna '
   'stream nombra nunca llega a un SQLite local — mismo mecanismo que mantiene afuera a `animals`/`users`/ '
   '`import_log` y a `audit.record_version`. El guard (TR.19) es el correcto para ese invariante porque '
   'matchea el YAML, que es donde vive la frontera real. Residual declarado: costo de WAL y superficie hacia '
-  'el servicio administrado de PowerSync. NO agregar estas tablas a `rafaq.yaml`.';
+  'el servicio administrado de PowerSync. NO agregar estas tablas a `mitropero.yaml`.';
 
 comment on column public.rodeo_membership_history.establishment_id is
   'Denormalizado por convención (ADR-026). NO ES FRONTERA DE AUTORIZACIÓN: la RLS de esta tabla usa '

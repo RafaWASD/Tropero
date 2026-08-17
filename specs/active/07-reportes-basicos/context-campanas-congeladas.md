@@ -64,7 +64,7 @@ peor que números que faltan.
   disponible y **asume que nunca se movió** — falso para los que sí se movieron, y hay que decirlo en la
   spec, no taparlo. El historial real empieza a acumularse desde el deploy.
 - **DL8 — La historia de membresía NO va a PowerSync.** Es historia server-side para reportes; no se agrega
-  a `sync-streams/rafaq.yaml` (mismo criterio que `audit.record_version`, ADR-032 §1.2). Igual lleva
+  a `sync-streams/mitropero.yaml` (mismo criterio que `audit.record_version`, ADR-032 §1.2). Igual lleva
   `establishment_id` denormalizado por ADR-026.
 - **DL9 — El cierre es online-only**, como el resto de spec 07 ("online-only server-side"). Es un gesto de
   oficina con señal, no de manga.

@@ -17,7 +17,7 @@
 //   - TA.13 (spoof) se ejerce por `user_roles` (Gate 1 watch-item #2: animals no es escribible directo por
 //     authenticated y además está gateada).
 //   - TA.11 (frontera WAL): la publication `powersync` es FOR ALL TABLES → el frontier real son las SYNC
-//     STREAMS (sync-streams/rafaq.yaml). El invariante que se testea es "audit NO referenciada en rafaq.yaml
+//     STREAMS (sync-streams/mitropero.yaml). El invariante que se testea es "audit NO referenciada en mitropero.yaml
 //     (sin catch-all)", no la membresía en pg_publication_tables (que fallaría bajo FOR ALL TABLES).
 //
 // Cubre: TA.1–TA.16 del design → R1.3–R1.6, R1.8, R1.11, R2.1, R2.2, R2.6, R2.8, R3.1, R3.2, R3.3, R3.5,
@@ -302,7 +302,7 @@ test('audit forense suite — spec 18', async (t) => {
 
   // ── TA.11 frontera WAL: audit NO referenciada en las sync streams — R4.2/R4.3 (reconciliado) ──────
   await t.test('TA.11 audit NO está en las sync streams (frontier real; publication es FOR ALL TABLES)', async () => {
-    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'rafaq.yaml'), 'utf8');
+    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'mitropero.yaml'), 'utf8');
     // Strippear comentarios (full-line Y inline `# …`) para no matchear menciones en prosa (p.ej. el
     // comentario "# audit de exports" de sigsa_export_log): buscar solo en la config YAML activa.
     const active = yaml.split(/\r?\n/).map((l) => l.replace(/#.*$/, '')).join('\n');

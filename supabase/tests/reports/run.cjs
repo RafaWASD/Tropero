@@ -51,7 +51,7 @@
 //   - TR.17  regresión tacto sin jornada + guard de clase (ninguna de las 7 referencia session_id).
 //   - TR.18  denominador (retired = 0, entoradas = serviced) — asserteado dentro de kpiBundle, o sea en TODOS
 //            los escenarios del delta, no en uno elegido.
-//   - TR.19  guard de AUSENCIA: las 3 tablas nuevas no están en sync-streams/rafaq.yaml (case-insensitive).
+//   - TR.19  guard de AUSENCIA: las 3 tablas nuevas no están en sync-streams/mitropero.yaml (case-insensitive).
 //   - TR.20  el detalle por animal ES la evidencia del número congelado (conteo por bucket == cabecera).
 //   - TR.21  guard y cota ANTES del cortocircuito por snapshot, sobre el conjunto de funciones DESCUBIERTO
 //            del catálogo (Gate 1 H-1, bloqueante).
@@ -2340,8 +2340,8 @@ test('reports suite — spec 07 Stream C (RPC de reportes)', async (t) => {
   });
 
   // ── TR.19 — guard de AUSENCIA en las sync rules (DL8 / RCC.13.10) ─────────────────────────────────────
-  await t.test('TR.19 (campañas congeladas) las 3 tablas nuevas NO están en sync-streams/rafaq.yaml', async () => {
-    const yamlPath = path.join(REPO_ROOT, 'sync-streams', 'rafaq.yaml');
+  await t.test('TR.19 (campañas congeladas) las 3 tablas nuevas NO están en sync-streams/mitropero.yaml', async () => {
+    const yamlPath = path.join(REPO_ROOT, 'sync-streams', 'mitropero.yaml');
     const yaml = fs.readFileSync(yamlPath, 'utf8').toLowerCase();   // case-insensitive (Gate 1 L-3)
     for (const tbl of ['rodeo_membership_history', 'rodeo_campaign_snapshots', 'rodeo_campaign_snapshot_animals']) {
       assert.ok(!yaml.includes(tbl), `${tbl} NO debe estar en las sync rules (DL8: no baja a los devices)`);

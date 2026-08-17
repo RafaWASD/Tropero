@@ -148,19 +148,19 @@ deberá fallar (no debe haber ninguna publication que la incluya).
 > **Reconciliación as-built (2026-07-13, implementer — regla dura de reconciliación).** La verificación
 > read-only de R4.1 en dev arrojó que la publication `powersync` es **`FOR ALL TABLES`**
 > (`puballtables = true`), NO `FOR TABLE` explícita como asumía esta spec. **El frontier de sincronización
-> real de este proyecto no es la publication sino las SYNC STREAMS** (`sync-streams/rafaq.yaml`): el WAL
+> real de este proyecto no es la publication sino las SYNC STREAMS** (`sync-streams/mitropero.yaml`): el WAL
 > replica toda la base al servicio de PowerSync y cada stream scopea explícitamente qué llega a cada device
-> (ADR-025/026; header de `rafaq.yaml`; así se mantiene fuera a `animals`/`users`/`import_log` hoy). En
+> (ADR-025/026; header de `mitropero.yaml`; así se mantiene fuera a `animals`/`users`/`import_log` hoy). En
 > consecuencia:
 > - **R4.1** (verificar `puballtables = false`) queda **no aplicable como STOP**: la realidad del proyecto
 >   es `FOR ALL TABLES`. La verificación equivalente que SÍ importa es que `audit` no aparezca en las sync
 >   streams (no hay stream catch-all).
-> - **R4.2** se cumple por intención: la migración no agrega `audit` a `rafaq.yaml` (nunca sincroniza a un
+> - **R4.2** se cumple por intención: la migración no agrega `audit` a `mitropero.yaml` (nunca sincroniza a un
 >   device). No se puede excluir de un `FOR ALL TABLES`; el residual es costo de WAL menor (INSERT-only,
 >   acotado por retención 90d).
 > - **R4.3** literal (audit ausente de `pg_publication_tables`) **no se puede satisfacer** bajo `FOR ALL
 >   TABLES` (la incluye). El invariante equivalente verificado por la suite (TA.11) es **"audit no
->   referenciada en `sync-streams/rafaq.yaml`, sin catch-all"**. El objetivo de seguridad de **D5 (el audit
+>   referenciada en `sync-streams/mitropero.yaml`, sin catch-all"**. El objetivo de seguridad de **D5 (el audit
 >   forense no fuga a devices) SE CUMPLE** por el frontier de streams.
 >
 > Esta reconciliación **requiere ratificación de Raf en Puerta 2** (cambia el mecanismo del frontier de D5:

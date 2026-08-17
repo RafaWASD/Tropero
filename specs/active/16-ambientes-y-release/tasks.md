@@ -243,7 +243,7 @@ escribe a un ambiente real vive en Run F, gateado.
   Cubre: R7.6 (PROD).
 
 - [ ] **F5** — 🔒(dep b) Provisionar PowerSync "Production" (conexión a DB PROD,
-  `client_auth.supabase:true`) → `powersync-deploy.sh --env prod` con `sync-streams/rafaq.yaml` **sin
+  `client_auth.supabase:true`) → `powersync-deploy.sh --env prod` con `sync-streams/mitropero.yaml` **sin
   tocar**. Cubre: R1.2, R5.9.
 
 - [ ] **F6** — `pg_dump --schema-only` DEV vs PROD → diff. Cada delta → migración `0124+` aplicada a

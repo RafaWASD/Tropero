@@ -46,11 +46,11 @@ a un device, sería un leak forense.
 > **[As-built 2026-07-13 — reconciliación del frontier]** La verificación read-only de R4.1 arrojó que la
 > publication `powersync` es **`FOR ALL TABLES`** (`puballtables = true`), NO `FOR TABLE` explícita como
 > asumía esta spec. En este proyecto **el frontier de sincronización NO es la publication sino las SYNC
-> STREAMS** (`sync-streams/rafaq.yaml`): el WAL replica TODA la base al servicio de PowerSync, y cada stream
-> scopea explícitamente qué llega a cada device (ADR-025/026; header de `rafaq.yaml`). Una tabla que no
+> STREAMS** (`sync-streams/mitropero.yaml`): el WAL replica TODA la base al servicio de PowerSync, y cada stream
+> scopea explícitamente qué llega a cada device (ADR-025/026; header de `mitropero.yaml`). Una tabla que no
 > aparece en ninguna stream (y no hay stream catch-all) nunca llega a un device — mismo mecanismo que
 > mantiene fuera a `animals`/`users`/`import_log`. Por eso `audit.record_version` **no se agrega a
-> `rafaq.yaml`** (R4.2 intent) → no fuga a devices. No se puede excluir del `FOR ALL TABLES` → residual =
+> `mitropero.yaml`** (R4.2 intent) → no fuga a devices. No se puede excluir del `FOR ALL TABLES` → residual =
 > costo de WAL menor (INSERT-only, retención 90d). **D5 (audit no fuga a devices) SE CUMPLE por el frontier
 > de streams.** R4.1 (STOP si `FOR ALL TABLES`) y R4.3 (audit ausente de `pg_publication_tables`) quedan
 > reconciliados: el invariante verificado (TA.11) es "audit no referenciada en las sync streams". **Requiere
@@ -107,9 +107,9 @@ por tabla**.
 -- ⚠️ NO aplicar desde acá: deploy gateado (Raf/leader) tras Gate 2 + Puerta 2.
 --    Frontier WAL (R4.x, RECONCILIADO al as-built): la publication `powersync` es FOR ALL TABLES
 --    (puballtables=true, verificado en dev 2026-07-13). El frontier real son las sync streams
---    (`sync-streams/rafaq.yaml`): audit.* NO aparece en ninguna stream (sin catch-all) → nunca llega
+--    (`sync-streams/mitropero.yaml`): audit.* NO aparece en ninguna stream (sin catch-all) → nunca llega
 --    a un device (D5 se cumple por el frontier de streams, igual que animals/users hoy). audit.* NO
---    se agrega a rafaq.yaml. Convertir la publication no aporta seguridad y es más riesgoso (Gate 2).
+--    se agrega a mitropero.yaml. Convertir la publication no aporta seguridad y es más riesgoso (Gate 2).
 --
 -- SEMÁNTICA TEMPORAL + ACTOR (D2 + H1 — leer antes de usar el log):
 --   * auth_uid = el ACTOR REAL:
@@ -420,7 +420,7 @@ supabase-js `.schema('audit')` con `anon`/`authenticated`.
 > ejercido igual. TA.2/TA.3 (INSERT/UPDATE uid por JWT), TA.4/TA.5 (DELETE + record_id estable) y TA.6
 > (actor NULL) se hacen sobre `user_roles`. **TA.13 (spoof)** se ejerce por `user_roles` (Gate 1 watch-item
 > #2: `animals` no es escribible directo por `authenticated` y está gateada). **TA.11 (frontera WAL)** se
-> reconcilia al frontier real: assert de que `audit` NO está referenciada en `sync-streams/rafaq.yaml` (sin
+> reconcilia al frontier real: assert de que `audit` NO está referenciada en `sync-streams/mitropero.yaml` (sin
 > catch-all), NO membresía en `pg_publication_tables` (que fallaría bajo `FOR ALL TABLES`). Se agrega
 > verificación de que `animals` NO tiene el trigger de audit todavía (gate pendiente).
 
@@ -436,7 +436,7 @@ supabase-js `.schema('audit')` con `anon`/`authenticated`.
 | TA.8 fail-closed authenticated | `authenticated` no puede `SELECT` audit | R3.2, R3.3 |
 | TA.9 grants lectura | `has_table_privilege` anon/authenticated SELECT = false; `has_schema_privilege` USAGE = false | R3.1, R3.7 |
 | TA.10 append-only | anon/authenticated sin UPDATE/DELETE privilege sobre audit | R1.8 |
-| TA.11 WAL frontier | **[as-built]** `audit` NO referenciada en `sync-streams/rafaq.yaml` (frontier real, sin catch-all) + `animals` sin trigger de audit (gate pendiente); la publication es `FOR ALL TABLES` (documentado) | R4.2, R4.3 |
+| TA.11 WAL frontier | **[as-built]** `audit` NO referenciada en `sync-streams/mitropero.yaml` (frontier real, sin catch-all) + `animals` sin trigger de audit (gate pendiente); la publication es `FOR ALL TABLES` (documentado) | R4.2, R4.3 |
 | **TA.12 actor Opción A (prod-path)** | **service_role client con header `X-Rafaq-Actor` → INSERT `user_roles` → audit.auth_uid = actor** (camino REAL de la EF; no falso verde) | R2.6, R5.1, R7.4a |
 | **TA.13 spoof-safety** | **[as-built]** **`authenticated` con header `X-Rafaq-Actor` forjado → UPDATE de su propia fila de `user_roles` (policy `user_roles_update_owner`) → auth_uid = su auth.uid() real, NO el header** | R2.8, R7.4c |
 | TA.14 best-effort vs estricto | (documental/comportamental) `animals` best-effort no bloquea; `user_roles` estricto — verificar `tg_argv` del trigger vía `adminQuery` a `pg_trigger` | R1.11 |

@@ -1,7 +1,7 @@
 // AppSchema — el schema LOCAL de PowerSync (spec 15, T1.3 / R2.1).
 //
 // PowerSync no enforça tipos: AppSchema es una VISTA sobre lo que sincronizan las sync streams
-// (sync-streams/rafaq.yaml). Espeja las 26 tablas sincronizadas del schema as-built + 1 tabla
+// (sync-streams/mitropero.yaml). Espeja las 26 tablas sincronizadas del schema as-built + 1 tabla
 // OUTBOX (`op_intents`, insertOnly) + las 5 tablas OVERLAY optimista (`pending_*`, localOnly).
 //
 // Reglas del SDK (verificadas contra @powersync/common 1.53.2 instalado):
@@ -9,7 +9,7 @@
 //    (el SDK tira "An id column is automatically added, custom id columns are not supported").
 //  - Las filas que bajan por la stream DEBEN traer un `id`. Para las tablas cuyo PK as-built NO se
 //    llama `id` (user_private: PK `user_id`) o es COMPUESTO (rodeo_data_config, birth_calves), la
-//    stream EMITE un `id` con alias/sintético (ver rafaq.yaml). Acá esas tablas mantienen sus
+//    stream EMITE un `id` con alias/sintético (ver mitropero.yaml). Acá esas tablas mantienen sus
 //    columnas as-built como columnas normales; el `id` implícito porta el valor aliased/sintético.
 //    → reconciliación de la "decisión abierta de PK" (design §PK), resuelta en T1.3.
 //  - column.text/integer/real. timestamptz/date/uuid → TEXT (PowerSync no tipa, SQLite es laxo).
@@ -127,7 +127,7 @@ const establishments = new Table({
   // del campo (editar-campo) carga vía la RPC update_renspa (owner-only, R2.3). Baja por la stream
   // est_establishments (SELECT *). Sin declararla, el SQLite local NO la materializa → la lectura offline del
   // checklist/edición no la vería (`SELECT renspa` tiraría "no such column"). Cambio de schema CLIENTE (no
-  // toca rafaq.yaml ni se deploya: la columna server-side ya existe).
+  // toca mitropero.yaml ni se deploya: la columna server-side ya existe).
   renspa: column.text,
   plan_type: column.text,
   plan_started_at: column.text,
@@ -162,7 +162,7 @@ const rodeos = new Table({
   // (puesta en servicio, Stream A 0102). En Postgres es `smallint[]`; PowerSync materializa un array
   // no-escalar como TEXT/JSON client-side → se declara `column.text` y se parsea TOLERANTE con
   // `parseServiceMonths` (service-months.ts). La stream est_rodeos hace SELECT * → la columna baja sola
-  // (sin tocar rafaq.yaml). Sin esta declaración el SQLite local no la materializa y `SELECT rd.service_months`
+  // (sin tocar mitropero.yaml). Sin esta declaración el SQLite local no la materializa y `SELECT rd.service_months`
   // tiraría "no such column".
   service_months: column.text,
   created_at: column.text,

@@ -4,7 +4,7 @@
 //
 // QUÉ valida: la frontera de AUTORIZACIÓN del SYNC SET (lo que un device recibiría por PowerSync),
 // NO la RLS de PostgREST. Las dos fronteras son distintas: el WAL replica la tabla base ignorando
-// views/RPC/column-GRANTs (ADR-025), así que el contenido de cada stream (`sync-streams/rafaq.yaml`)
+// views/RPC/column-GRANTs (ADR-025), así que el contenido de cada stream (`sync-streams/mitropero.yaml`)
 // ES la frontera. Estos tests son el ESPEJO de los runners RLS (supabase/tests/rls/run.cjs), pero
 // sobre las STREAMS en vez de las policies.
 //
@@ -238,7 +238,7 @@ async function seedBirth(ownerClient, establishmentId, rodeoId, systemId) {
   return { reproductiveEventId: birthId, calfProfileId: bc.calf_profile_id, motherProfileId };
 }
 
-// ── Predicado de la stream: org_scope / owner_scope de un actor (mismo SQL que rafaq.yaml). ────────
+// ── Predicado de la stream: org_scope / owner_scope de un actor (mismo SQL que mitropero.yaml). ────────
 // Lo computamos con service_role (bypassa RLS) → es el SET de campos que la STREAM le daría al device
 // de ese user. NO usamos auth.user_id() (no hay sesión PostgREST acá); el equivalente exacto es
 // filtrar user_roles por user_id = <actor> AND active = true [AND role='owner'].
@@ -411,7 +411,7 @@ test('spec 15-powersync — no-bypass por device (sync streams, T7.2 + T9.7)', a
 
   // ── animals NO está en el sync set de NADIE. ──────────────────────────────────────────────────────
   await t.test('animals (T9.7): NO está en ninguna stream (NO se sincroniza)', () => {
-    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'rafaq.yaml'), 'utf8');
+    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'mitropero.yaml'), 'utf8');
     // Ninguna stream declara `FROM animals` (sí `FROM animal_profiles`/`FROM animal_events`/etc., que
     // son tablas distintas). Verificamos con un \b word-boundary para no matchear animal_profiles.
     assert.doesNotMatch(yaml, /FROM\s+animals\b/i, 'animals NO debe figurar como FROM en ninguna stream');
@@ -554,7 +554,7 @@ test('spec 15-powersync — no-bypass por device (sync streams, T7.2 + T9.7)', a
 
   // ── member_name denormalizado (c2, 0080): el nombre del coworker viaja en user_roles, no en users. ─
   await t.test('c2 (T9.7): member_name viaja en user_roles (owner-only), users NO se sincroniza', async () => {
-    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'rafaq.yaml'), 'utf8');
+    const yaml = fs.readFileSync(path.join(REPO_ROOT, 'sync-streams', 'mitropero.yaml'), 'utf8');
     assert.doesNotMatch(yaml, /FROM\s+users\b/i, 'users NO debe figurar como FROM en ninguna stream (c2: nombre denorm. en user_roles)');
     // El nombre del coworker CoA está denormalizado en su user_roles de estA y lo ve el owner A.
     const ownerA = await ownerScope(userA.id);

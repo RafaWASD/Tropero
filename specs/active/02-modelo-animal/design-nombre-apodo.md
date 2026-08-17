@@ -38,7 +38,7 @@
 Un "apodo" **global** (`establishment_id NULL`): **sincroniza** (`catalog_field_definitions`: `WHERE establishment_id IS NULL`), **se puede habilitar** (`editar-plantilla` lee el catálogo entero), el **gating server acepta** su carga (`assert_custom_field_enabled` 0096 es data-driven por `field_definition_id`, sin check de tenant) — **pero el cliente NUNCA lo renderiza en el alta ni lo muestra en la ficha** (las dos queries de arriba lo excluyen). Feature muerta. → El seed **debe ser per-est** para fluir por el mecanismo vigente **sin tocar queries** (D4). Corrobora: el helper e2e `seedCustomField` (admin.ts) inserta `propiedad` con `establishment_id`.
 
 ### Sync + gating verificados para la fila per-est
-- `est_field_definitions_custom` (rafaq.yaml): `SELECT * FROM field_definitions WHERE establishment_id IN org_scope AND deleted_at IS NULL` → la fila per-est baja a los devices con rol en ese est (RNA.6.1, sin fuga cross-tenant).
+- `est_field_definitions_custom` (mitropero.yaml): `SELECT * FROM field_definitions WHERE establishment_id IN org_scope AND deleted_at IS NULL` → la fila per-est baja a los devices con rol en ese est (RNA.6.1, sin fuga cross-tenant).
 - `assert_custom_field_enabled` (0096): fail-closed; solo acepta si el "apodo" está `enabled` en el `rodeo_data_config` del rodeo del animal (RNA.6.3).
 - `assert_custom_value_valid` (0096): `ui_component='text'` → value debe ser string JSON (RNA.6.3).
 
@@ -123,7 +123,7 @@ Se **evaluó y descartó** (Puerta 1, decisión final) un trigger `AFTER INSERT 
 
 ## Multi-tenancy (RLS) — mención explícita
 
-Toca `field_definitions`, tabla con eje de tenant (`establishment_id`). El seed per-est **reusa** la RLS y las streams vigentes (0093 + rafaq.yaml): SELECT global para `establishment_id IS NULL`, custom solo con rol; la fila per-est del "apodo" sincroniza solo dentro de su establecimiento (`est_field_definitions_custom`) → sin fuga cross-tenant (RNA.6.1). El backfill corre por migración (service-role, `auth.uid()` NULL → el guard `tg_field_definitions_custom_guard` hace early-return, sin forzar owner). **Sin trigger** sobre `establishments` → el path de onboarding (spec 01) no se toca (RNA.6.5). Gate 1 (condicional) audita que el seed no reabre ni relaja ninguna policy/stream/gating.
+Toca `field_definitions`, tabla con eje de tenant (`establishment_id`). El seed per-est **reusa** la RLS y las streams vigentes (0093 + mitropero.yaml): SELECT global para `establishment_id IS NULL`, custom solo con rol; la fila per-est del "apodo" sincroniza solo dentro de su establecimiento (`est_field_definitions_custom`) → sin fuga cross-tenant (RNA.6.1). El backfill corre por migración (service-role, `auth.uid()` NULL → el guard `tg_field_definitions_custom_guard` hace early-return, sin forzar owner). **Sin trigger** sobre `establishments` → el path de onboarding (spec 01) no se toca (RNA.6.5). Gate 1 (condicional) audita que el seed no reabre ni relaja ninguna policy/stream/gating.
 
 ## Offline-first — mención explícita
 

@@ -1,4 +1,4 @@
-# sync-streams/rafaq.yaml — Sync Streams de RAFAQ (spec 15). PASO 1 (JOIN-FREE) — 2026-06-09.
+# sync-streams/mitropero.yaml — Sync Streams de miTropero (spec 15). PASO 1 (JOIN-FREE) — 2026-06-09.
 #
 # ⚠️ El contenido de estas streams ES la frontera de autorización (lo audita Gate 1). NO hay RLS por
 #    encima del wire de sync: el WAL replica la tabla base ignorando views/RPCs/column-GRANTs (ADR-025).

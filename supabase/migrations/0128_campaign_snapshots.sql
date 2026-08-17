@@ -7,7 +7,7 @@
 --
 -- 🔴 NO se aplica al remoto desde acá: la aplica el LEADER tras Gate 1 + reviewer + Gate 2 + Gate 2.5 + OK de
 -- Raf, en el orden 0127 → 0128 → 0129 → 0130. La suite supabase/tests/reports/run.cjs queda ROJA-HASTA-APPLY.
--- **No** se agrega nada a `sync-streams/rafaq.yaml` (DL8 / RCC.4.9).
+-- **No** se agrega nada a `sync-streams/mitropero.yaml` (DL8 / RCC.4.9).
 
 begin;
 

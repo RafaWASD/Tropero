@@ -224,7 +224,7 @@ export function buildMembershipsQuery(userId: string): LocalQuery {
  * EVIDENCIA AFIRMATIVA de E1 (spec 20, R20.31 / design §4.3-§4.4): la fila LOCAL de rol del
  * PROPIO usuario en un establecimiento, leyendo el VALOR de `active` (no filtrando por él).
  *
- * ⚠️ WHY — de qué cuelga esto: la stream `self_user_roles` (`sync-streams/rafaq.yaml`) es
+ * ⚠️ WHY — de qué cuelga esto: la stream `self_user_roles` (`sync-streams/mitropero.yaml`) es
  * `SELECT * FROM user_roles WHERE user_id = auth.user_id()`, **sin `org_scope` y sin filtro
  * `active`**. Consecuencia dura: cuando revocan el acceso, el establishment sale de `org_scope`
  * y PowerSync borra ese bucket (la fila de `establishments` desaparece del SQLite local), pero

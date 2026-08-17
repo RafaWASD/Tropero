@@ -4,7 +4,7 @@
 -- public/authenticated/anon (R13.24, lección SEC-HIGH-01). Patrón de 0055.
 --
 -- La frontera WAL del sync (R13.20/R13.21) NO vive en una migración: es el delta de
--- sync-streams/rafaq.yaml (catalog_field_definitions restringido a establishment_id IS NULL + 3 streams
+-- sync-streams/mitropero.yaml (catalog_field_definitions restringido a establishment_id IS NULL + 3 streams
 -- custom scope establishment) — lo deploya el LEADER en el dashboard de PowerSync (Validate → Deploy).
 --
 -- NO aplicar al remoto desde acá: lo aplica el LEADER tras gatear.

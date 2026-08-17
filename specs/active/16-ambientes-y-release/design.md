@@ -38,7 +38,7 @@ La feature no crea tablas de negocio, pero **sí toca** la frontera multi-tenant
 - La resolución de env (R3) corre en el **boot** de la app. Las lecturas estáticas + el fallback
   dinámico/`extra` no cambian la semántica de arranque offline: si las vars están inlineadas (build de
   prod) el cliente Supabase/PowerSync bootea igual sin red.
-- PROD usa **el mismo** `sync-streams/rafaq.yaml` sin tocarlo (R6). Las estrategias de conflicto y los
+- PROD usa **el mismo** `sync-streams/mitropero.yaml` sin tocarlo (R6). Las estrategias de conflicto y los
   buckets no cambian: es el mismo sync set apuntando a otra DB.
 - Cambiar el `package`/`bundleIdentifier` a `.dev` (R2.2) implica una **instalación nueva** → SQLite
   local fresco → primer sync completo. Aceptado (context.md, edge case "Bundle `.dev`").
@@ -453,7 +453,7 @@ de Raf); el runbook documenta URLs + config.
 4. Deploy de las **8** Edge Functions + `health` a PROD (`supabase functions deploy <fn> --project-ref
    <prod>`; `health` con `--no-verify-jwt`).
 5. Provisionar PowerSync "Production" (conexión a DB PROD, `client_auth.supabase:true`) →
-   `powersync-deploy.sh --env prod` con `sync-streams/rafaq.yaml` **sin tocar**.
+   `powersync-deploy.sh --env prod` con `sync-streams/mitropero.yaml` **sin tocar**.
 6. `pg_dump --schema-only` DEV vs PROD → diff (R6.3); cada delta → `0124+` (R6.4).
 7. EAS Environment Variables preview/production → PROD (R4.4).
 8. GitHub secret + primer backup + restore drill (R8).

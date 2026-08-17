@@ -252,7 +252,7 @@ function daysAgo(n) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-// org_scope de un actor (mismo SQL que ev_scrotal_measurements en rafaq.yaml), computado con service_role.
+// org_scope de un actor (mismo SQL que ev_scrotal_measurements en mitropero.yaml), computado con service_role.
 async function orgScope(userId) {
   const { data, error } = await admin
     .from('user_roles').select('establishment_id').eq('user_id', userId).eq('active', true);

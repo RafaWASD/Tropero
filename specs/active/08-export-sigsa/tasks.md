@@ -24,7 +24,7 @@
 
 **Backlog (LOW, no bloqueante)**: el generador no tiene tope de registros tipo `MAX_SIGSA_RECORDS` del parser inverso. El Gate 2 lo juzgó no-vector (procesa el inventario propio del usuario, no input attacker-controlled). Considerar un cap cuando se implemente la capa de I/O (T11).
 
-**Diferido + gateado** (NO en este chunk): T1-T6 (migraciones a la DB compartida), T7 (PowerSync/`rafaq.yaml`), T11-T20 (servicio I/O, hook, pantallas). Las 4 decisiones abiertas de Puerta 1 se cierran al implementar esas capas.
+**Diferido + gateado** (NO en este chunk): T1-T6 (migraciones a la DB compartida), T7 (PowerSync/`mitropero.yaml`), T11-T20 (servicio I/O, hook, pantallas). Las 4 decisiones abiertas de Puerta 1 se cierran al implementar esas capas.
 
 **Pendiente de reconvergencia de terminales** (no tocado por aislamiento): flip de `feature_list.json` + entrada en `progress/history.md` cuando la terminal dueña reconverja.
 
@@ -62,7 +62,7 @@
 
 ## Bloque B — PowerSync sync config + schema local
 
-- [x] **T7** — Agregar `breed_catalog`, `sigsa_declarations`, `export_log` al schema de PowerSync (`app/src/services/powersync/schema.ts`) y a `sync-streams/rafaq.yaml` con las streams explícitas del diseño (MEDIUM-2): `sigsa_breed_catalog` (global), `sigsa_declarations` (`org_scope`), `sigsa_export_log` (`org_scope`). Cubre: R1.8, R14.2, R14.3, R15.1.
+- [x] **T7** — Agregar `breed_catalog`, `sigsa_declarations`, `export_log` al schema de PowerSync (`app/src/services/powersync/schema.ts`) y a `sync-streams/mitropero.yaml` con las streams explícitas del diseño (MEDIUM-2): `sigsa_breed_catalog` (global), `sigsa_declarations` (`org_scope`), `sigsa_export_log` (`org_scope`). Cubre: R1.8, R14.2, R14.3, R15.1.
 
   **Tests**: (a) el schema local TypeScript tiene las columnas correctas para las 3 tablas nuevas; (b) una inserción local en `sigsa_declarations` queda en la cola de sync de PowerSync; (c) offline: se puede leer `breed_catalog` del SQLite local; (d) un usuario con rol en 2 establecimientos solo recibe en SQLite local los `sigsa_declarations` y `export_log` de los establecimientos donde tiene rol activo (no de otros tenants) (MEDIUM-2).
 
