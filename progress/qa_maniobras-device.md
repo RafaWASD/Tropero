@@ -678,3 +678,104 @@ la CE sigue con "≈" después de elegirla a mano.
 - **Verificación contra la base**: el MCP de Supabase estuvo `Unauthorized` toda la sesión.
 
 Fases **B** (100 animales) y **C** (edge cases de flujo) **no empezadas** — a la espera del OK.
+
+---
+
+## Fase A-bis — 2026-08-15: primera prueba con el **RS420 REAL** de Allflex
+
+**Rig**: A07 · APK release LOCAL (árbol sobre `c84014d`, instalado con `-r` sobre la debug keystore) ·
+**Allflex RS420 real**, prestado del campo del padre de Facundo · **una caravana real suelta**
+(`982000364696048`, no un animal real) · animal de prueba con visual `REAL123`.
+
+**El hito**: es la primera lectura de un bastón **comercial real** (hasta ahora todo era el ESP32
+emulando SPP). Leyó, identificó y **cuatro maniobras se grabaron end-to-end**.
+
+### Lo que SÍ funcionó [MEDIDO — verificado en la DB de DEV, no solo en pantalla]
+
+Los 4 eventos llevan el `session_id` de la jornada `7d4af153…`:
+
+| hora UTC | evento |
+|---|---|
+| 02:35:59 | `condition_score_events` |
+| 02:36:06 | `weight_events` |
+| 02:36:09 | `sanitary_events` |
+| 02:36:11 | `sanitary_events` |
+
+### 🔴 D.1 — re-escanear un animal ya terminado abre una SEGUNDA maniobra ("Animal 2")
+
+**[MEDIDO]** Reportado por Raf. **[LEÍDO]** Es una **ausencia**, no una lógica mal escrita:
+`identificar.tsx:168` hace `router.replace('/maniobra/carga', { sessionId, profileId })` **sin consultar
+jamás si ese `profileId` ya fue capturado en esta sesión**, y `carga.tsx:899` arma el título con
+`Animal ${(session.animalCount ?? 0) + 1}` — un **contador monótono, no una identidad**. El único dedup
+existente es el de la lectura BLE (ventana corta del provider, anti-doble-bastonazo); pasada esa ventana
+el mismo animal entra como uno nuevo.
+
+**Esperado (Raf)**: reabrir la pantalla de confirmación con su resumen, para editar lo ya confirmado.
+Dos maniobras del mismo animal en la misma jornada no tienen sentido.
+
+### 🔴 D.2 — en monta natural, una vaquillona NUNCA puede llegar al tacto de preñez
+
+**[MEDIDO]** Vaquillona creada `diferida` → marcada `apta` desde la ficha → en modo maniobra con ambos
+tactos seleccionados, **los dos se saltearon** y la jornada no capturó ningún tacto.
+
+**[LEÍDO]** El salteo es **correcto según el diseño**: `tacto` (preñez) exige hembra **SERVIDA**
+(categoría PROBADA ∨ evento `service`) y `tacto_vaquillona` exige vaquillona **aún no apta**. Era apta y
+no servida → ninguno aplica. **Apta ≠ servida.**
+
+**El defecto real es la promesa incumplida.** `agregar-evento.tsx` ofrece "Servicio" **solo IA o TE**: la
+monta natural fue deprecada de esa vía a propósito, con este fundamento en `event-input.ts:186` —
+*"el servicio natural pasó a ser nivel-rodeo (derivado de `rodeos.service_months`) → cargarlo a mano por
+animal era ficticio"*. **Pero eso nunca se cableó**: `repro-status.ts:169` deriva `served_untested` solo
+de categoría PROBADA o evento `service`, y **no consulta `service_months`**. Barrido verificado —
+`service_months` lo usan reportes, `local-reads`, `outbox`, `calving-stage`, `pregnancy-buckets`;
+**ni `repro-status.ts` ni `maneuver-applicability.ts`**.
+
+⇒ **Hay dos definiciones distintas de "servida" en la misma app**: la de los reportes
+(`rodeo_serviced_females`, ventana del rodeo) y la del gate de maniobra/ficha (categoría ∨ evento). En un
+campo de monta natural —el caso dominante en cría, y el del padre de Facundo— **ninguna vaquillona es
+tactable de preñez jamás**.
+
+**Decisión de dominio pendiente de Facundo** (es la misma que bloquea U6a y la misma que
+`CONTEXT/07-pendientes.md` dejó abierta): ¿alcanza con derivar "servida" de la ventana del rodeo — y
+entonces hay que cablearlo en `repro-status` — o hace falta un marcador de **entorada** por animal?
+
+### 🟠 D.3 — forzar la categoría a `vaquillona_prenada` no crea evidencia de preñez
+
+**[MEDIDO]** `animal_category_history` registra `manual_override → vaquillona_prenada` (02:58:23), y
+`reproductive_events` tiene **cero** filas de preñez. Por eso el parto avisa *"Esta hembra no figura
+preñada en tus registros"* y el `%preñez` no la cuenta.
+
+**Está atado a D.2**: como forzar la categoría a una PROBADA es hoy **el único camino** que habilita el
+tacto de preñez, el usuario es empujado a falsear la categoría — y eso produce esta divergencia.
+
+**⚠️ El fix obvio es peor que el bug.** Que forzar la categoría genere un tacto positivo **inventa un
+diagnóstico que nadie hizo**: mete al `%preñez` una preñez sin tacto, sin fecha real y sin CCL,
+indistinguible después de un tacto de verdad. Cambia una inconsistencia visible por una silenciosa.
+Forzar la categoría es un **parche de datos**, no debería ser la puerta al ciclo reproductivo. Si D.2 se
+arregla bien, D.3 deja de doler.
+
+### ⚪ D.4 — `sessions.event_count` es CAMPO MUERTO (no es un bug visible)
+
+**[MEDIDO]** La jornada `7d4af153…` cerró con `animal_count = 1` y **`event_count = 0`**, mientras 4
+eventos llevan su `session_id`.
+
+**[LEÍDO] No llega a la pantalla.** La RPC `rodeo_sessions_list` **no lee** la columna: **recalcula** los
+dos contadores server-side con un `count(*)` sobre la unión de las 7 tablas de eventos
+(`count(distinct ev.animal_profile_id)` / `count(ev.animal_profile_id)`). O sea que Reportes → Jornadas
+muestra **4**, el número real, y la pantalla de detalle también (`session_event_summary`).
+
+La columna quedó sin mantener por **decisión explícita**: `carga.tsx:784` pasa `session?.eventCount ?? 0`
+sin tocarla, con el comentario *"acá no contamos eventos por maniobra, solo animales procesados"*. Y
+`sessions.ts` ya lo declara: *"Son metadata para el resumen, NO constraints de integridad: el conteo
+autoritativo se recomputa con `count(*)` por `session_id`"*.
+
+**Riesgo real, acotado**: la columna existe, siempre vale 0, y el próximo que la lea directo (en vez de
+llamar a la RPC) va a mostrar 0 eventos sin que ningún test se ponga en rojo. Es deuda de la clase
+"campo que miente en silencio", no un defecto de esta jornada.
+
+⚠️ **Corrección de método (leader, 2026-08-15)**: primero concluí que la lista mostraba la columna vieja
+y que era una mentira en pantalla. Lo había **inferido** de que `reports.ts` mapea `eventCount:
+r.event_count` — pero ese `r` es la fila de la RPC, no la tabla. El nombre coincidía y di por sentado el
+origen. Se corrigió leyendo `pg_get_functiondef`. Mismo patrón que
+[[feedback_verificar_lo_que_quedo_afuera]]: verificar la cosa de al lado y dejar que el parecido cierre la
+pregunta.
