@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#1E5A3E">
 <link rel="icon" href="data:,">
 <!-- CSP de defensa en profundidad (el _headers de Cloudflare Pages es la fuente autoritativa). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://xrhlxxdnfzvdnztacofj.supabase.co; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <style>
   :root {
     --bg:#FAF9F9; --surface:#F8F6F1; --primary:#1E5A3E; --primary-alt:#2E8259; --press:#184A33;
@@ -57,34 +57,20 @@
   .btn-sec:disabled { opacity:0.55; cursor:default; }
   .btn-small { padding:0.5rem 0.9rem; font-size:0.875rem; }
 
-  /* --- Vista login --- */
-  #view-login {
-    flex:1 0 auto; display:flex; flex-direction:column; justify-content:center; align-items:center;
-    padding:3rem 1.5rem;
-  }
-  .card {
-    background:var(--card); border:1px solid var(--divider); border-radius:16px;
-    padding:2.25rem 2rem; width:100%; max-width:26rem;
-    box-shadow:0 1px 2px rgba(15,14,12,0.04), 0 8px 24px rgba(15,14,12,0.05);
-  }
-  .card .wordmark { font-size:1.6rem; margin-bottom:1.5rem; }
-  .card h1 { font-size:1.4rem; line-height:1.3; margin:0 0 0.4rem; letter-spacing:-0.01em; }
-  .card .sub { font-size:0.9375rem; line-height:1.55; color:var(--muted); margin:0 0 1.75rem; }
+  /* --- Formularios (inputs compartidos por los filtros) --- */
   form label { display:block; font-size:0.875rem; font-weight:600; color:var(--text); margin-bottom:1rem; }
   form label span.lbl { display:block; margin-bottom:0.35rem; }
-  input[type="email"], input[type="password"], input[type="text"], input[type="date"], select {
+  input[type="text"], input[type="date"], select {
     display:block; width:100%; font-family:inherit; font-size:1rem; line-height:1.3; color:var(--text);
     background:#FFFFFF; border:1.5px solid var(--divider); border-radius:10px; padding:0.7rem 0.85rem;
   }
   input:focus, select:focus { border-color:var(--primary); outline:none; }
-  .card .btn { width:100%; margin-top:0.25rem; }
 
   /* --- Mensajes --- */
   .error, .notice {
     font-size:0.9375rem; line-height:1.5; border-radius:10px; padding:0.75rem 0.95rem; margin:0;
   }
   .error { color:var(--danger); background:var(--danger-bg); border:1px solid #FDA29B; }
-  #login-error { margin-top:1.25rem; }
   .notice { color:var(--warn); background:var(--warn-bg); border:1px solid #FEDF89; margin-bottom:1.25rem; }
 
   /* --- Vista consola --- */
@@ -95,7 +81,6 @@
   }
   .topbar .wordmark { font-size:1.15rem; }
   .topbar-right { display:flex; align-items:center; gap:1rem; }
-  #whoami { font-size:0.875rem; color:var(--muted); }
   .console { flex:1 0 auto; width:100%; max-width:76rem; margin:0 auto; padding:1.5rem; }
 
   /* --- Filtros --- */
@@ -188,34 +173,15 @@
 </head>
 <body>
 
-  <!-- ==================== VISTA: LOGIN ==================== -->
-  <main id="view-login" class="view">
-    <div class="card">
-      <p class="wordmark"><span class="mi">mi</span>Tropero</p>
-      <h1>Consola de auditoría</h1>
-      <p class="sub">Herramienta interna de staff. Ingresá con tu cuenta de miTropero.</p>
-      <form id="login-form" novalidate autocomplete="on">
-        <label>
-          <span class="lbl">Email</span>
-          <input type="email" id="login-email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required>
-        </label>
-        <label>
-          <span class="lbl">Contraseña</span>
-          <input type="password" id="login-password" autocomplete="current-password" required>
-        </label>
-        <button class="btn" type="submit" id="login-submit">Entrar</button>
-      </form>
-      <p class="error" id="login-error" role="alert" hidden></p>
-    </div>
-  </main>
-
   <!-- ==================== VISTA: CONSOLA ==================== -->
-  <div id="view-console" class="view" hidden>
+  <!-- Única vista: Cloudflare Access gatea en el borde (One-time PIN + allowlist de mails). La página no
+       autentica ni conoce el email del staff (la cookie de Access es HttpOnly). Arranca directo acá. -->
+  <div id="view-console" class="view">
     <header class="topbar">
       <p class="wordmark"><span class="mi">mi</span>Tropero <span class="tag">auditoría</span></p>
       <div class="topbar-right">
-        <span id="whoami"></span>
-        <button class="btn-sec btn-small" id="logout" type="button">Salir</button>
+        <!-- "Salir" cierra la sesión del borde de Access (no hay sesión propia de la app que cerrar). -->
+        <a class="btn-sec btn-small" href="/cdn-cgi/access/logout">Salir</a>
       </div>
     </header>
 
@@ -293,12 +259,8 @@
 
   <footer><p>miTropero · Consola interna de auditoría · Acceso restringido a staff</p></footer>
 
-  <!-- @supabase/supabase-js pineado a versión EXACTA + SRI (archivo original estático de jsDelivr, no el .min generado). -->
-  <script
-    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"
-    integrity="sha384-qafw21c/iciq0VXsi9FzkfoQv5I/V0iqE4lSNcKXPnW9/UTJLnv5CcN4FHxVLnKg"
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer"></script>
+  <!-- La web ya no carga supabase-js: no autentica ni conoce credenciales. La consulta va same-origin a
+       /api/audit_query (la Pages Function reenvía el JWT de Access que Cloudflare inyecta). -->
   <script src="app.js"></script>
 </body>
 </html>

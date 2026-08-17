@@ -388,6 +388,16 @@ deno_version = 2
 [functions.health]
 verify_jwt = false
 
+# spec 24 delta (cloudflare-access) — EF `audit_query` desplegada con verify_jwt=false. El gateway de
+# Supabase deja de exigir un JWT de Supabase (la anon key es PÚBLICA ⇒ no aportaba protección real; solo
+# acoplaría la Pages Function a un "secreto" que no lo es). La EF queda como ÚNICO gate y ese gate es
+# criptográfico: el JWT de Cloudflare Access (aud EXACTO + firma RS256) + el secreto compartido Function↔EF
+# (X-Mitropero-Proxy-Secret, M-1). Un request directo sin JWT de Access válido para nuestro aud → 401
+# (RCFA.4.4). El deploy remoto DEBE ir con `supabase functions deploy audit_query --no-verify-jwt` (este
+# bloque aplica en local/`supabase start`; el flag lo hace explícito y redundante en el deploy remoto).
+[functions.audit_query]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

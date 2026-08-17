@@ -1,31 +1,26 @@
 /*
  * Consola de auditoría interna de miTropero (staff).
  *
- * Seguridad (design §8):
- *   - JWT en memoria (variable JS), NUNCA en localStorage: el cliente supabase-js se crea con
- *     persistSession:false + autoRefreshToken:false.
+ * Auth (delta cloudflare-access): la web NO autentica. Cloudflare Access gatea en el borde (One-time PIN
+ * + allowlist de mails) y la consulta va same-origin a /api/audit_query. La Pages Function reenvía el JWT
+ * de Access (Cf-Access-Jwt-Assertion, que Cloudflare inyecta server-side) a la EF, que lo verifica. La web
+ * no maneja tokens ni la anon key; la cookie de Access es HttpOnly y viaja sola por ser same-origin.
+ *
+ * Seguridad (design §8, preservada):
  *   - TODOS los valores de record / old_record / actor se pintan con textContent (o vía DOM APIs),
  *     JAMÁS con innerHTML → sin XSS almacenado en la consola de staff (LOW-3).
- *   - Filtros SIEMPRE en el body del POST, nunca en la URL (R6.4 / R2.1).
- *   - supabase-js se carga pineado a versión exacta + SRI desde el <script> de index.html (M1).
+ *   - Filtros SIEMPRE en el body del POST, nunca en la URL (RCFA.3.4 / R2.1).
  */
 (function () {
   'use strict';
 
-  // --- Config (público por diseño: URL del proyecto DEV + anon/publishable key) -------------------
-  var SUPABASE_URL = 'https://xrhlxxdnfzvdnztacofj.supabase.co';
-  var SUPABASE_ANON_KEY = 'sb_publishable_iCiWUjiUycJJlHT0XSKs4w_HJ6bdktb';
-  var EF_URL = SUPABASE_URL + '/functions/v1/audit_query';
-
-  // Cliente supabase-js SOLO para el login. persistSession:false → el token no toca el storage.
-  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
+  // --- Config -------------------------------------------------------------------------------------
+  // Ruta same-origin a la Pages Function (que reenvía el JWT de Access a la EF). Sin URL de Supabase ni
+  // anon key: la web ya no habla directo con Supabase.
+  var EF_URL = '/api/audit_query';
 
   // --- Estado (todo en memoria) ------------------------------------------------------------------
   var state = {
-    accessToken: null, // JWT en memoria, no persistido
-    email: null,
     filters: null,     // filtros de la búsqueda vigente (para "Ver más")
     nextCursor: null,
     displayed: 0,
@@ -49,8 +44,7 @@
   };
   var ERROR_COPY = {
     method_not_allowed: 'Método no permitido.',
-    unauthorized: 'Tu sesión expiró. Ingresá de nuevo.',
-    not_staff: 'No tenés acceso a esta herramienta.',
+    unauthorized: 'Tu sesión expiró, recargá la página.',
     rate_limited: 'Demasiadas consultas seguidas. Esperá un momento y volvé a intentar.',
     invalid_filter: 'Alguno de los filtros es inválido. Revisá los campos.',
     db_error: 'Ocurrió un error del servidor. Volvé a intentar.',
@@ -131,28 +125,6 @@
   // ===============================================================================================
   // Vistas
   // ===============================================================================================
-  function showLogin(message) {
-    $('view-console').hidden = true;
-    $('view-login').hidden = false;
-    if (message) { setLoginError(message); } else { setLoginError(''); }
-    var email = $('login-email');
-    if (email) { email.focus(); }
-  }
-
-  function showConsole() {
-    $('view-login').hidden = true;
-    $('view-console').hidden = false;
-    var who = $('whoami');
-    who.textContent = state.email || '';
-    setNotice('');
-  }
-
-  function setLoginError(msg) {
-    var e = $('login-error');
-    if (msg) { e.textContent = msg; e.hidden = false; }
-    else { e.textContent = ''; e.hidden = true; }
-  }
-
   function setNotice(msg) {
     var n = $('console-notice');
     if (msg) { n.textContent = msg; n.hidden = false; }
@@ -166,46 +138,7 @@
   }
 
   // ===============================================================================================
-  // Auth
-  // ===============================================================================================
-  function doLogin(email, password) {
-    setLoginError('');
-    var submit = $('login-submit');
-    submit.disabled = true;
-    submit.textContent = 'Entrando…';
-
-    sb.auth.signInWithPassword({ email: email, password: password }).then(function (res) {
-      submit.disabled = false;
-      submit.textContent = 'Entrar';
-      if (res.error || !res.data || !res.data.session) {
-        setLoginError('Email o contraseña incorrectos.');
-        return;
-      }
-      state.accessToken = res.data.session.access_token;
-      state.email = (res.data.session.user && res.data.session.user.email) || email;
-      // No dejar la contraseña colgando en el DOM.
-      $('login-password').value = '';
-      showConsole();
-    }, function () {
-      submit.disabled = false;
-      submit.textContent = 'Entrar';
-      setLoginError('No se pudo conectar. Revisá tu conexión e intentá de nuevo.');
-    });
-  }
-
-  function doLogout(message) {
-    try { sb.auth.signOut(); } catch (e) { /* best-effort */ }
-    state.accessToken = null;
-    state.email = null;
-    state.filters = null;
-    state.nextCursor = null;
-    state.displayed = 0;
-    clearResults();
-    showLogin(message);
-  }
-
-  // ===============================================================================================
-  // Filtros + fetch a la EF
+  // Filtros + fetch a la EF (vía la Pages Function same-origin)
   // ===============================================================================================
   function val(id) {
     var e = $(id);
@@ -224,14 +157,13 @@
     return f;
   }
 
-  // POST a la EF. Filtros en el body (NUNCA en la URL). JWT en Authorization, apikey anon.
+  // POST same-origin a la Pages Function. Filtros en el body (NUNCA en la URL). Sin Authorization ni
+  // apikey: la cookie de Access viaja sola (same-origin) y la Function reenvía el JWT a la EF.
   function callEf(body) {
     return fetch(EF_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + state.accessToken,
-        'apikey': SUPABASE_ANON_KEY
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(body)
     }).then(function (res) {
@@ -294,16 +226,9 @@
     var msg = (code && ERROR_COPY[code]) || 'Ocurrió un error. Volvé a intentar.';
 
     if (resp.status === 401) {
-      // Sesión inválida/expirada → volver al login.
-      doLogout(ERROR_COPY.unauthorized);
-      return;
-    }
-    if (resp.status === 403 && code === 'not_staff') {
-      // Sin acceso: no pintar ningún dato del audit.
-      clearResults();
-      $('load-more').hidden = true;
-      $('empty-state').hidden = true;
-      setNotice(ERROR_COPY.not_staff);
+      // Sesión de Access expirada (o request que no pasó por Access). Recargar re-autentica en el borde.
+      // No pintamos ningún dato del audit.
+      setNotice(ERROR_COPY.unauthorized);
       return;
     }
     setNotice(msg);
@@ -487,19 +412,8 @@
   // Wiring
   // ===============================================================================================
   function init() {
-    $('login-form').addEventListener('submit', function (ev) {
-      ev.preventDefault();
-      var email = $('login-email').value.trim();
-      var password = $('login-password').value;
-      if (!email || !password) {
-        setLoginError('Completá email y contraseña.');
-        return;
-      }
-      doLogin(email, password);
-    });
-
-    $('logout').addEventListener('click', function () { doLogout(''); });
-
+    // Sin wiring de login/logout: Access gatea en el borde y "Salir" es un link a /cdn-cgi/access/logout.
+    // La consola es la única vista y arranca montada; nada que "mostrar" tras un login.
     $('filters').addEventListener('submit', function (ev) {
       ev.preventDefault();
       runSearch();
