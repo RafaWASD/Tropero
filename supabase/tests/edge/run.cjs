@@ -80,7 +80,7 @@ const createdUserIds = [];
 const createdEstablishmentIds = [];
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: PASSWORD,
@@ -217,7 +217,7 @@ test('Edge Functions — Fase 2', async (t) => {
     const { data, error } = await ownerClient.functions.invoke('invite_user', {
       body: {
         establishment_id: estA,
-        email: `${RUN_TAG}_invitee@rafaq-test.local`,
+        email: `${RUN_TAG}_invitee@mitropero-test.local`,
         role: 'veterinarian',
       },
     });
@@ -271,7 +271,7 @@ test('Edge Functions — Fase 2', async (t) => {
     const { data, error } = await memberClient.functions.invoke('invite_user', {
       body: {
         establishment_id: estA,
-        email: `${RUN_TAG}_intruder@rafaq-test.local`,
+        email: `${RUN_TAG}_intruder@mitropero-test.local`,
         role: 'veterinarian',
       },
     });
@@ -283,7 +283,7 @@ test('Edge Functions — Fase 2', async (t) => {
     const { data, error } = await ownerClient.functions.invoke('invite_user', {
       body: {
         establishment_id: estA,
-        email: `${RUN_TAG}_invalid@rafaq-test.local`,
+        email: `${RUN_TAG}_invalid@mitropero-test.local`,
         role: 'owner',
       },
     });
@@ -312,7 +312,7 @@ test('Edge Functions — Fase 2', async (t) => {
   });
 
   await t.test('T2.1: invitar email con pending no expirada falla 409', async () => {
-    const sameEmail = `${RUN_TAG}_invitee@rafaq-test.local`;
+    const sameEmail = `${RUN_TAG}_invitee@mitropero-test.local`;
     const { data, error } = await ownerClient.functions.invoke('invite_user', {
       body: {
         establishment_id: estA,
@@ -368,7 +368,7 @@ test('Edge Functions — Fase 2', async (t) => {
     const { data: created } = await ownerClient.functions.invoke('invite_user', {
       body: {
         establishment_id: estA,
-        email: `${RUN_TAG}_tocancel@rafaq-test.local`,
+        email: `${RUN_TAG}_tocancel@mitropero-test.local`,
         role: 'field_operator',
       },
     });
@@ -394,7 +394,7 @@ test('Edge Functions — Fase 2', async (t) => {
     const { data: cancelled } = await admin
       .from('invitations')
       .select('id')
-      .eq('email', `${RUN_TAG}_tocancel@rafaq-test.local`)
+      .eq('email', `${RUN_TAG}_tocancel@mitropero-test.local`)
       .single();
 
     const { data, error } = await ownerClient.functions.invoke(
@@ -413,7 +413,7 @@ test('Edge Functions — Fase 2', async (t) => {
   await t.test('T2.2 R5.5: destinatario acepta invitación', async () => {
     // Creamos el user destinatario con el mismo email de la invitación pending
     // (que actualmente tiene el token nuevo de T2.4).
-    const inviteeEmail = `${RUN_TAG}_invitee@rafaq-test.local`;
+    const inviteeEmail = `${RUN_TAG}_invitee@mitropero-test.local`;
     const { data, error } = await admin.auth.admin.createUser({
       email: inviteeEmail,
       password: PASSWORD,
@@ -463,7 +463,7 @@ test('Edge Functions — Fase 2', async (t) => {
   await t.test('T2.2 R5.6: invitación expirada falla', async () => {
     // Creamos una invitación pending y le ponemos expires_at en el pasado.
     const expiredToken = `expired_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
-    const expiredEmail = `${RUN_TAG}_expired@rafaq-test.local`;
+    const expiredEmail = `${RUN_TAG}_expired@mitropero-test.local`;
 
     const { data: created, error: createErr } = await admin
       .from('invitations')
@@ -598,7 +598,7 @@ test('Edge Functions — Fase 2', async (t) => {
       // El binding solo es confiable con email verificado (enforcement server-side, no depende de
       // enable_confirmations). User NO confirmado (email_confirm:false) con el MISMO email de la
       // invitación → no debe entrar.
-      const unverifiedEmail = `${RUN_TAG}_u9unverified@rafaq-test.local`;
+      const unverifiedEmail = `${RUN_TAG}_u9unverified@mitropero-test.local`;
       const token = `u9unverified_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
       const { data: invRow, error: invErr } = await admin
         .from('invitations')
@@ -665,7 +665,7 @@ test('Edge Functions — Fase 2', async (t) => {
     { skip: SKIP_U9 },
     async () => {
       const token = `u9mismatch_${RUN_TAG}_${Math.random().toString(36).slice(2, 8)}`;
-      const annotatedEmail = `${RUN_TAG}_u9annotated@rafaq-test.local`;
+      const annotatedEmail = `${RUN_TAG}_u9annotated@mitropero-test.local`;
       const { data: invRow, error: invErr } = await admin
         .from('invitations')
         .insert({

@@ -1002,7 +1002,7 @@ ${dryRun ? 'rollback;' : 'commit;'}
 // ---------------------------------------------------------------------------------------------------------
 async function bootstrap() {
   const stamp = Date.now();
-  const email = `seed_test_${stamp}@rafaq-test.local`;
+  const email = `seed_test_${stamp}@mitropero-test.local`;
   const user = await authAdmin('users', {
     method: 'POST',
     body: JSON.stringify({

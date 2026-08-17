@@ -129,7 +129,7 @@ async function setupWithRetry(label, fn, { tries = 4, delay = 500 } = {}) {
 // ---- helpers de fixtures --------------------------------------------------
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: PASSWORD,

@@ -91,7 +91,7 @@ const createdEstablishmentIds = [];
 const createdAnimalIds = [];
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: PASSWORD,
@@ -354,7 +354,7 @@ test('spec 15-powersync — no-bypass por device (sync streams, T7.2 + T9.7)', a
         .from('invitations')
         .insert({
           establishment_id: estA,
-          email: `${RUN_TAG}_invitee@rafaq-test.local`,
+          email: `${RUN_TAG}_invitee@mitropero-test.local`,
           role: 'field_operator',
           token: randomUUID(),
           status: 'pending',

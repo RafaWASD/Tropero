@@ -74,7 +74,7 @@ const createdUserIds = [];
 const createdEstablishmentIds = [];
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: PASSWORD,
@@ -267,7 +267,7 @@ test('spec 14 — user_private (PII self-only, B3-1)', async (t) => {
     {
       const { error } = await clientA
         .from('user_private')
-        .insert({ user_id: userA.id, email: `${RUN_TAG}_dup@rafaq-test.local` });
+        .insert({ user_id: userA.id, email: `${RUN_TAG}_dup@mitropero-test.local` });
       assert.notEqual(error, null, 'el cliente no debería poder insertar en user_private');
     }
     // delete directo de cliente → bloqueado.
@@ -333,7 +333,7 @@ test('spec 14 — user_private (PII self-only, B3-1)', async (t) => {
   // T23 — propagación de email confirmado.  R7.1, R7.2
   // -------------------------------------------------------------------
   await t.test('T23 R7.1: cambiar el email confirmado (admin) propaga a user_private', async () => {
-    const newEmail = `${RUN_TAG}_a_changed@rafaq-test.local`;
+    const newEmail = `${RUN_TAG}_a_changed@mitropero-test.local`;
     // admin.updateUserById con email + email_confirm:true simula la confirmación: auth.users.email
     // pasa a ser el nuevo → dispara el trigger on_auth_user_email_confirmed.
     const { error } = await admin.auth.admin.updateUserById(userA.id, {
@@ -414,7 +414,7 @@ test('spec 14 — user_private (PII self-only, B3-1)', async (t) => {
         .maybeSingle();
       const canonicalEmail = cur.email; // = auth.users.email de B (lo seteó el signup/trigger).
 
-      const sentinel = `${RUN_TAG}_b_sentinel@rafaq-test.local`;
+      const sentinel = `${RUN_TAG}_b_sentinel@mitropero-test.local`;
       {
         const { error } = await admin
           .from('user_private')
@@ -663,7 +663,7 @@ test('spec 01 delta TELÉFONO — user_private_phone_format_chk (migración 0126
     }
     // El UPDATE de email lo hace el trigger con permisos de definer; acá lo simulamos con
     // service_role (el cliente no tiene grant para escribir su email) sobre la MISMA fila.
-    const newEmail = `${RUN_TAG}_phone_changed@rafaq-test.local`;
+    const newEmail = `${RUN_TAG}_phone_changed@mitropero-test.local`;
     const { error: emailErr } = await admin
       .from('user_private')
       .update({ email: newEmail })
@@ -675,7 +675,7 @@ test('spec 01 delta TELÉFONO — user_private_phone_format_chk (migración 0126
     );
 
     // Y el camino REAL del trigger: confirmar un email nuevo en auth.users propaga a user_private.
-    const confirmedEmail = `${RUN_TAG}_phone_confirmed@rafaq-test.local`;
+    const confirmedEmail = `${RUN_TAG}_phone_confirmed@mitropero-test.local`;
     const { error: authErr } = await admin.auth.admin.updateUserById(user.id, {
       email: confirmedEmail,
       email_confirm: true,

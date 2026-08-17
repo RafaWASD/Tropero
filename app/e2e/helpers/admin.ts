@@ -7,11 +7,13 @@
 //
 // DB COMPARTIDA: el remoto se usa también para el testing manual de Raf. Por eso:
 //   - Emails namespaced bajo @mitropero-e2e.test con un RUN_TAG único por corrida (no colisiona
-//     con los @rafaq-test.local de las suites de `supabase/tests/**` ni con datos reales).
-//     ⚠️ Ese `@rafaq-test.local` NO es un descuido del rebrand: es el dominio que HOY usan las 20
-//     suites backend (`supabase/tests/*/run.cjs`) y `scripts/seed-facundina.mjs`, que viven fuera de
-//     `app/` y se renombran en su propia pasada. Mientras diverjan, los dos namespaces siguen sin
-//     chocar (que es lo único que este comentario afirma).
+//     con los @mitropero-test.local de las suites de `supabase/tests/**` ni con datos reales).
+//     ⚠️ Son DOS dominios distintos a propósito (difieren en label Y en TLD): `mitropero-e2e.test`
+//     es el de acá y `mitropero-test.local` el de las 15 suites backend (`supabase/tests/*/run.cjs`)
+//     + `scripts/seed-facundina.mjs --bootstrap`. Los dos se rebrandearon (fase 2 el de acá,
+//     2026-08-17 el backend), pero siguen sin chocar — que es lo único que este comentario afirma.
+//     En el remoto conviven además los residuos pre-rebrand `@rafaq-e2e.test` y `@rafaq-test.local`,
+//     de corridas viejas; nadie los barre automáticamente (ver `docs/backlog.md`, purgado manual).
 //   - Todo lo creado se trackea y se borra (global-teardown.ts hace el barrido final).
 //   - Nunca tocamos ni leemos datos que no hayamos creado nosotros.
 //

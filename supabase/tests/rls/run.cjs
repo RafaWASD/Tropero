@@ -69,7 +69,7 @@ const createdUserIds = [];
 const createdEstablishmentIds = [];
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password: PASSWORD,
@@ -361,7 +361,7 @@ test('RLS suite — multi-tenant isolation', async (t) => {
     const { error } = await clientA.from('invitations').insert({
       establishment_id: estA,
       invited_by: userA.id,
-      email: `${RUN_TAG}_invitee@rafaq-test.local`,
+      email: `${RUN_TAG}_invitee@mitropero-test.local`,
       role: 'veterinarian',
       token: `tok_${RUN_TAG}_1`,
       expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
@@ -373,7 +373,7 @@ test('RLS suite — multi-tenant isolation', async (t) => {
     const { error } = await clientB.from('invitations').insert({
       establishment_id: estA,
       invited_by: userB.id,
-      email: `${RUN_TAG}_intruso@rafaq-test.local`,
+      email: `${RUN_TAG}_intruso@mitropero-test.local`,
       role: 'veterinarian',
       token: `tok_${RUN_TAG}_intruso`,
       expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),

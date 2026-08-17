@@ -66,7 +66,7 @@ const createdUserIds = [];
 const createdEstablishmentIds = [];
 
 async function createTestUser(label) {
-  const email = `${RUN_TAG}_${label}@rafaq-test.local`;
+  const email = `${RUN_TAG}_${label}@mitropero-test.local`;
   const { data, error } = await admin.auth.admin.createUser({
     email, password: PASSWORD, email_confirm: true, user_metadata: { name: `Test ${label}` },
   });
