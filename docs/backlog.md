@@ -17,6 +17,39 @@ No es un sustituto de `feature_list.json` ni de los ADRs — es la antesala dond
 
 ## Ítems pendientes
 
+## 2026-08-17 — 🟡 Limpieza del rename de headers: sacar la lectura del nombre VIEJO (`X-Rafaq-*`)
+
+**Origen**: fase 5 del rebrand miTropero. El rename se hizo **en dos tiempos** a propósito; esta entrada
+es el tercer tiempo, y **no se ejecuta todavía**.
+
+**Qué queda por sacar** (todo junto, un solo commit):
+- `supabase/functions/_shared/request-headers.ts` → las constantes `LEGACY_ACTOR_HEADER` /
+  `LEGACY_REQUEST_ID_HEADER` y su entrada en `ACCEPTED_REQUEST_ID_HEADERS`. Con eso, `cors.ts` deja de
+  publicar `x-rafaq-request-id` **solo** (se deriva de esa lista) y `readRequestIdHeader` deja de mirarlo.
+- Una migración que re-CREE `audit.resolve_actor()` y `audit.resolve_request_id()` sin el fallback a
+  `x-rafaq-actor` / `x-rafaq-request-id` (hoy: `0133_rename_audit_headers_mitropero.sql`), moldeada sobre el
+  cuerpo **vigente en el remoto**.
+- Los tests que hoy exigen la tolerancia: `supabase/functions/_shared/request-headers.test.ts` (*"el nombre
+  VIEJO sigue resolviendo"*) y `supabase/tests/audit/run.cjs` TA.17 y TA.19. **Están escritos para ponerse
+  rojos si alguien limpia antes de tiempo** — ese rojo es la pregunta "¿ya no quedan clientes viejos?",
+  no un test desactualizado.
+
+**La condición que lo habilita** — las dos, no una:
+1. **No quedan builds instaladas escribiendo el nombre viejo.** Hoy hay TestFlight + el APK de los testers
+   de Android y **no hay OTA** (`app/app.config.ts` no tiene bloque `updates`; expo-updates es Fase 0). La
+   única forma de que un cliente instalado cambie de header es que alguien instale una build nueva a mano.
+2. **Medido, no supuesto**: cero filas nuevas de `audit.record_version` con `request_id` proveniente del
+   header viejo. Como la columna no guarda cuál de los dos nombres llegó, la forma barata de medirlo es
+   mirar los logs de las EFs (o agregar temporalmente una marca) antes de sacar el fallback.
+
+**Por qué importa que no se haga antes**: un cliente viejo contra un servidor sin fallback escribe
+`request_id` **NULL** en el audit. No rompe nada visible: la correlación se pierde **en silencio**, que
+para una feature de auditoría es el peor modo de falla. El costo de esperar es un `if` de más en dos
+funciones SQL y una entrada de más en `Access-Control-Allow-Headers`.
+
+**Próximo paso sugerido**: nada ahora. Revisar cuando la app esté en las tiendas (que es cuando también se
+tocan bundle id, `scheme` y la org de Expo — ver la entrada de la fase 6).
+
 ## 2026-08-07 — 🟠 Las 35 tablas de `public` son TRUNCATE-ables por `authenticated`
 
 **Origen**: Gate 2 del delta `campanas-congeladas` (spec 07). Lo encontró auditando si las 3 tablas nuevas

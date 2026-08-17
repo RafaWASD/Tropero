@@ -11,13 +11,11 @@
 
 import { handleOptions } from './cors.ts';
 import { serverError } from './errors.ts';
+import { readRequestIdHeader } from './request-headers.ts';
 import { buildEfIn, buildEfOut } from './serve-log.ts';
 
 export type EfContext = { requestId: string };
 export type EfHandler = (req: Request, ctx: EfContext) => Promise<Response> | Response;
-
-const UUID_RE =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 export function serveEf(fn: string, handler: EfHandler): void {
   Deno.serve(async (req) => {
@@ -27,9 +25,12 @@ export function serveEf(fn: string, handler: EfHandler): void {
       return pre;
     }
 
-    const incoming = req.headers.get('X-Rafaq-Request-Id');
-    const requestId =
-      incoming && UUID_RE.test(incoming) ? incoming : crypto.randomUUID();
+    // R2.2/R2.3/R2.4: el id entrante se usa si tiene forma de uuid; si no vino uno válido, se genera
+    // server-side para no perder la traza. La resolución (QUÉ nombres se aceptan y la validación de forma)
+    // vive en `request-headers.ts` — rebrand fase 5: se acepta el nombre NUEVO y, si no vino uno válido con
+    // ese nombre, el VIEJO. Hay builds instaladas sin OTA que siguen mandando el viejo; **acá** es donde se
+    // las atrapa, antes de que el admin client re-emita el id ya con el nombre nuevo hacia PostgREST.
+    const requestId = readRequestIdHeader(req) ?? crypto.randomUUID();
 
     const start = Date.now();
 

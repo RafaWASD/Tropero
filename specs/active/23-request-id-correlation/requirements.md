@@ -11,7 +11,7 @@
 
 - **requestId** — uuid v4 random, **sin significado** (no deriva de datos de usuario → no-PII). Identifica
   UNA acción de usuario para correlacionarla cruzando fronteras (cliente → EF → audit → Sentry/PostHog).
-- **Header de correlación** — `X-Rafaq-Request-Id`. Análogo a `X-Rafaq-Actor` (spec 18).
+- **Header de correlación** — `X-Mitropero-Request-Id`. Análogo a `X-Mitropero-Actor` (spec 18).
 - **EF** — Edge Function de Supabase. Hay 9 hoy.
 - **Tabla auditada** — tabla con trigger `audit_i_u_d` prendido. Hoy: solo `public.user_roles`.
 
@@ -26,8 +26,8 @@
   (uuid v4) para esa acción.
 - **R1.2** — El `requestId` deberá ser un uuid v4 random sin significado derivado de datos de usuario (no-PII).
 - **R1.3** — Cuando el cliente invoca una Edge Function, el sistema deberá enviar el `requestId` en el header
-  `X-Rafaq-Request-Id` de esa llamada.
-- **R1.4** — El sistema deberá agregar el header `X-Rafaq-Request-Id` en los tres call-sites de EFs del
+  `X-Mitropero-Request-Id` de esa llamada.
+- **R1.4** — El sistema deberá agregar el header `X-Mitropero-Request-Id` en los tres call-sites de EFs del
   cliente: el hub genérico `invokeFn` (`app/src/services/members.ts`), `deleteAccount`
   (`app/src/services/account.ts`) y `registerPushTokenBestEffort` (`app/src/services/push-notifications.ts`).
 - **R1.5** — El sistema deberá exponer una única función utilitaria que produzca el `requestId`, de modo que
@@ -42,11 +42,11 @@
 
 - **R2.1** — El sistema deberá proveer un wrapper en `supabase/functions/_shared/` que envuelva `Deno.serve`
   para las Edge Functions.
-- **R2.2** — Cuando un request trae el header `X-Rafaq-Request-Id` con forma de uuid válido, el wrapper deberá
+- **R2.2** — Cuando un request trae el header `X-Mitropero-Request-Id` con forma de uuid válido, el wrapper deberá
   usar ese valor como `requestId` de la llamada.
-- **R2.3** — Si un request no trae el header `X-Rafaq-Request-Id` (app vieja), entonces el wrapper deberá
+- **R2.3** — Si un request no trae el header `X-Mitropero-Request-Id` (app vieja), entonces el wrapper deberá
   generar un `requestId` server-side para no perder la traza.
-- **R2.4** — Si el header `X-Rafaq-Request-Id` entrante no tiene forma de uuid válido, entonces el wrapper
+- **R2.4** — Si el header `X-Mitropero-Request-Id` entrante no tiene forma de uuid válido, entonces el wrapper
   deberá tratarlo como ausente y generar un `requestId` server-side (evita valores basura / log-injection).
 - **R2.5** — El wrapper deberá exponer el `requestId` al handler (vía un segundo argumento de contexto) para
   que el handler lo pase a `createAdminClient(actorId, requestId)` cuando escribe una tabla auditada.
@@ -66,10 +66,40 @@
 - **R2.11** — La migración de cada EF al wrapper no deberá cambiar su contrato observable (método, status
   codes, `code` de error, shape del body de respuesta).
 - **R2.12** — `createAdminClient` deberá aceptar un segundo parámetro opcional `requestId` y, cuando se pasa,
-  setear el header global `X-Rafaq-Request-Id` en el admin client. Sin `requestId`, el comportamiento deberá
+  setear el header global `X-Mitropero-Request-Id` en el admin client. Sin `requestId`, el comportamiento deberá
   ser idéntico al actual (cambio aditivo).
-- **R2.13** — El header `X-Rafaq-Request-Id` deberá estar permitido por la política CORS de las EFs
+- **R2.13** — El header `X-Mitropero-Request-Id` deberá estar permitido por la política CORS de las EFs
   (`Access-Control-Allow-Headers`) para que el preflight del navegador no lo bloquee.
+
+> **RECONCILIACIÓN (rebrand fase 5, 2026-08-17, migración `0133`) — aplica a R1.4, R2.2, R2.3, R2.4, R2.12,
+> R2.13 y R3.3.**
+> El header se llamaba **`X-Rafaq-Request-Id`** cuando se escribió esta spec; hoy se llama
+> **`X-Mitropero-Request-Id`** y el literal quedó actualizado arriba. Lo que estos EARS **no dicen y es
+> parte del as-built**:
+> - **El rename se hizo en DOS TIEMPOS y el servidor acepta los DOS nombres**, en las dos capas y con el
+>   mismo criterio (gana el nuevo; se cae al viejo si el nuevo falta o no es un uuid). Son **dos
+>   tolerancias distintas** y conviene no confundirlas:
+>   - **`readRequestIdHeader` (`_shared/request-headers.ts`, que usa `serveEf`)** es la que le sirve a las
+>     **builds ya instaladas**: hay TestFlight + el APK de los testers y **no hay OTA**, así que su header
+>     no cambia nunca. Ese cliente le habla a una EF por HTTP; la EF lo atrapa ahí y el admin client
+>     re-emite el id ya con el nombre NUEVO hacia PostgREST.
+>   - **`audit.resolve_request_id()`** cubre a quien le manda el nombre viejo **directo a PostgREST**: la
+>     ventana entre aplicar la migración y redeployar las EFs, un redeploy parcial o un rollback.
+>   Con corte seco (cualquiera de las dos), el `request_id` entraría **NULL** o con un uuid generado
+>   server-side que no es el del evento de dominio: la correlación se pierde **en silencio**, el peor modo
+>   de falla de esta feature. La limpieza del fallback tiene su propia entrada, con condición, en
+>   `docs/backlog.md`.
+> - **R2.3 se cumple igual y por dos caminos ahora**: una app vieja que manda el nombre viejo YA NO cae en
+>   "no trae el header" — su id se respeta. El wrapper genera uno server-side sólo si no vino ninguno.
+> - **R2.13 se cumple por DERIVACIÓN, no por un literal**: `cors.ts` arma el `Access-Control-Allow-Headers`
+>   a partir de la misma lista que recorre el lector (`ACCEPTED_REQUEST_ID_HEADERS`) → publica los dos
+>   nombres y no puede desalinearse del lector. Verificado sobre el preflight real de DEV.
+> - **R3.5 (anti-spoof) sigue intacta**: el fallback vive DENTRO del gate de `service_role`. Verificado por
+>   TA.21 de la suite `audit`, que forja las **dos** grafías desde un `authenticated`.
+> - **Cobertura nueva**: la suite `audit` sumó TA.18 (nombre nuevo → `request_id` aterriza), TA.19 (nombre
+>   VIEJO → aterriza igual) y TA.20 (sin header → NULL). Antes de esta fase, R3.7/R3.8 no tenían **ningún**
+>   test backend que ejerciera el header de correlación contra la base.
+> - La migración `0131` **no se editó** (append-only): el literal viejo que se lee ahí es historia.
 
 ---
 
@@ -81,7 +111,7 @@
 - **R3.1** — La migración deberá agregar una columna `request_id uuid` **NULLABLE** a `audit.record_version`.
 - **R3.2** — La migración deberá crear un índice parcial sobre `request_id` con `where request_id is not null`.
 - **R3.3** — El sistema deberá proveer una función `audit.resolve_request_id()` que lea el header
-  `x-rafaq-request-id` del GUC `request.headers` **solo** cuando el rol de sesión (`request.jwt.claims->>'role'`)
+  `x-mitropero-request-id` del GUC `request.headers` **solo** cuando el rol de sesión (`request.jwt.claims->>'role'`)
   es `service_role`.
 - **R3.4** — `audit.resolve_request_id()` deberá validar que el valor del header tenga forma de uuid antes de
   castear; si no la tiene, deberá devolver NULL.
@@ -202,7 +232,7 @@
 
 | acceptance | requirements |
 |---|---|
-| Header X-Rafaq-Request-Id → request_id en audit.record_version (user_roles) | R1.3, R2.5, R3.7, R3.8, R3.10 |
+| Header X-Mitropero-Request-Id → request_id en audit.record_version (user_roles) | R1.3, R2.5, R3.7, R3.8, R3.10 |
 | Wrapper emite dos líneas JSON (entrada/salida) sin body | R2.6, R2.7, R2.8 |
 | Mismo requestId como tag en Sentry y prop en PostHog | R4.1, R4.2 |
 | Fallback de crash y surfacing de rechazo muestran código de soporte copiable | R5.3, R5.4, R5.7 |

@@ -433,6 +433,15 @@ Cambiar el identificador `ar.rafq.app` **crea una app nueva** a los ojos de las 
 > la app ni las Edge Functions hacen un solo `set_config`/`current_setting`). Por eso se pudo hacer en
 > una sola migración atómica, sin ventana de desalineación. Ver `progress/rebrand-fase4-gucs.md`.
 
+> **Segunda corrección (17/08): el header `X-Rafaq-Actor` TAMPOCO quedó sin tocar.** La fase 5 lo renombró
+> a `X-Mitropero-Actor` (y `X-Rafaq-Request-Id` → `X-Mitropero-Request-Id`), migración `0133` + redeploy de
+> las Edge Functions, DEV. Lo que era cierto de la línea de arriba es el **motivo** —hay clientes viejos
+> instalados que no se pueden actualizar—, y por eso **no se hizo con corte seco**: la base **lee los dos
+> nombres** y la app escribe sólo el nuevo. Un cliente viejo sigue quedando correctamente auditado; el día
+> que no quede ninguno se saca el fallback (condición escrita en `docs/backlog.md`). Lo que sigue intacto
+> de esta lista: los prefijos de storage `rafq.*` y `slug`/`owner`/`projectId` de EAS.
+> Ver `progress/rebrand-fase5-headers.md`.
+
 > **Corrección (16/08).** Esta lista incluía también *el nombre del archivo `sync-streams/rafaq.yaml`*, y estaba mal: **nunca fue un contrato**. `scripts/powersync-deploy.sh` lo copia a `powersync/sync-config.yaml` y **eso** es lo único que ve la instancia de PowerSync; el nombre de la fuente es local al repo. Se renombró a `sync-streams/mitropero.yaml` en la fase 3 del rebrand, sin deploy y sin re-sync de devices (los nombres de las streams nunca llevaron la marca). Ver `progress/rebrand-fase3-powersync.md`.
 
 ### El resto

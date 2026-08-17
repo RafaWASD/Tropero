@@ -36,7 +36,7 @@ import { runLocalQuery } from './powersync/local-query';
 import { offlineError } from './powersync/online-guard';
 import { getPowerSync } from './powersync/database';
 import { mapMemberRows, type MemberListItem, type MemberRow } from '../utils/sort-members';
-import { newRequestId } from '../utils/request-id';
+import { newRequestId, REQUEST_ID_HEADER } from '../utils/request-id';
 
 // Base URL para reconstruir el accept_url de invitaciones PENDIENTES a partir del token. Las
 // invitaciones recién creadas/regeneradas ya traen `accept_url` del backend; para las que listamos
@@ -149,7 +149,7 @@ async function invokeFn<T>(
   try {
     const res = await supabase.functions.invoke(name, {
       body,
-      headers: { 'X-Rafaq-Request-Id': rid },
+      headers: { [REQUEST_ID_HEADER]: rid },
     });
     data = res.data;
     error = res.error;

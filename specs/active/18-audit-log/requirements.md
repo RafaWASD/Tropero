@@ -87,7 +87,7 @@ SYNC** (cuándo la mutación llegó al servidor), no la hora en que el operario 
 (`event_date`, `weight_date`, `started_at`, …), y no debe confundirse con `ts`.
 
 **R2.6** — Cuando una Edge Function con `service_role` muta una tabla trackeada, el sistema deberá
-propagar el actor por el header de request `X-Rafaq-Actor`; el trigger deberá leerlo con
+propagar el actor por el header de request `X-Mitropero-Actor`; el trigger deberá leerlo con
 `current_setting('request.headers')` y usarlo como `auth_uid` **únicamente si** el rol de la sesión es
 `service_role`.
 
@@ -95,9 +95,29 @@ propagar el actor por el header de request `X-Rafaq-Actor`; el trigger deberá l
 Edge Function (el que devuelve `requireUser`), y no deberá tomarse del body/payload del request (sería
 spoofeable).
 
-**R2.8** — Si un cliente `authenticated` setea el header `X-Rafaq-Actor` en su propio write a una tabla
+**R2.8** — Si un cliente `authenticated` setea el header `X-Mitropero-Actor` en su propio write a una tabla
 trackeada, entonces el sistema deberá ignorarlo y usar `auth.uid()` (el header solo se confía cuando el
 rol es `service_role` → un usuario no puede falsear el autor de su propio write).
+
+> **RECONCILIACIÓN (rebrand fase 5, 2026-08-17, migración `0133`) — aplica a R2.6, R2.8 y R7.4.**
+> El header se llamaba **`X-Rafaq-Actor`** cuando se escribió esta spec; hoy se llama
+> **`X-Mitropero-Actor`** y el literal quedó actualizado arriba. Lo que estos EARS **no dicen y es parte
+> del as-built**: el rename se hizo **en dos tiempos** y el servidor **acepta los dos nombres**.
+> `audit.resolve_actor()` lee `x-mitropero-actor` y, si no vino o no tiene forma de uuid, `x-rafaq-actor`.
+> - **Por qué** — y acá conviene ser preciso, porque el actor **no** lo manda nunca un cliente: lo mintea
+>   `createAdminClient` con el `user.id` del JWT ya validado (R2.7). El fallback NO existe para las builds
+>   instaladas (esas mandan el header de *correlación* a la EF, no el de actor a PostgREST); existe para la
+>   **ventana de deploy** entre aplicar la migración y redeployar las Edge Functions —en la que las EFs
+>   viejas siguen mandando `x-rafaq-actor` a PostgREST—, para un redeploy parcial o el rollback de una EF, y
+>   para cualquier caller futuro que escriba directo. Sin él, **el orden del deploy** podía dejar filas de
+>   audit con `auth_uid` NULL: no rompe nada visible, la atribución se pierde **en silencio**.
+> - **R2.8 sigue intacta y se reforzó**: el fallback vive **dentro** del gate
+>   `request.jwt.claims->>'role' = 'service_role'`, así que no abre ningún canal nuevo de spoof. La suite
+>   lo verifica con las **dos** grafías (TA.13 con el nombre nuevo, TA.21 con el viejo y el nuevo juntos).
+> - **R7.4 quedó ampliada** con (d) header VIEJO bajo `service_role` → `auth_uid` = el actor (TA.17), y
+>   (e) un control negativo sin ningún header → NULL (TA.20).
+> - Quitar el fallback es una fase de limpieza posterior, con su condición escrita en `docs/backlog.md`.
+> - La migración `0124` **no se editó** (append-only): el literal viejo que se lee ahí es historia.
 
 **R2.9** — Las Edge Functions que mutan `user_roles` con `service_role` — `accept_invitation`,
 `change_member_role`, `remove_member`, `delete_account` — deberán propagar el actor (R2.6/R2.7).
@@ -231,9 +251,9 @@ trackeada (`animals`) con un usuario de test.
 `check.mjs` (sin regresión); con la suite nueva, `check.mjs` deberá quedar verde con 15 suites.
 
 **R7.4** — La suite deberá verificar la atribución de actor de Opción A por el **camino de producción**
-(no un falso verde, cf. Gate 1): (a) write de `service_role` con header `X-Rafaq-Actor` → `auth_uid` =
+(no un falso verde, cf. Gate 1): (a) write de `service_role` con header `X-Mitropero-Actor` → `auth_uid` =
 el actor; (b) write de `service_role` **sin** header → `auth_uid` NULL; (c) write de `authenticated`
-con header `X-Rafaq-Actor` forjado a una tabla trackeada → `auth_uid` = su `auth.uid()` real, **no** el
+con header `X-Mitropero-Actor` forjado a una tabla trackeada → `auth_uid` = su `auth.uid()` real, **no** el
 header (spoof-safety de R2.8).
 
 ---
@@ -294,7 +314,7 @@ respuestas, mismas validaciones de autorización.
 - **H1 (HIGH) — actor de `user_roles` sería NULL** (se muta por Edge Functions con `service_role`).
   Raf eligió **Opción A (propagación de actor real)**. Reconciliado:
   - R2.1 reformulada (actor real = `auth.uid()` **o** actor propagado por EF); **agregadas R2.6–R2.9**
-    (propagación por header `X-Rafaq-Actor` guardada por rol `service_role`; actor del JWT del llamante,
+    (propagación por header `X-Mitropero-Actor` guardada por rol `service_role`; actor del JWT del llamante,
     no del body; spoof-safety; enumeración de las 4 EFs). **R7.4 agregada** (test del camino de prod).
     **R8.3 agregada** (no cambiar el contrato de las EFs).
   - **Corrección al alcance de Gate 1:** de las 5 EFs señaladas, `invite_user` **no** muta `user_roles`
@@ -304,7 +324,7 @@ respuestas, mismas validaciones de autorización.
     …, true)` literal del reporte **no** funciona con supabase-js, porque cada llamada (`.from().update()`
     / `.rpc()`) es una **transacción distinta** bajo el pooler → una GUC `set_config(local=true)` puesta
     en una llamada no está en la transacción del DML de la siguiente. La Opción A se realiza con el
-    header `X-Rafaq-Actor` (único canal per-request y **misma-transacción** que tiene supabase-js), que
+    header `X-Mitropero-Actor` (único canal per-request y **misma-transacción** que tiene supabase-js), que
     PostgREST expone como `request.headers`. Es spoof-safe por el guard de rol `service_role` (R2.8). La
     alternativa "RPC único que set_config+DML" queda documentada en `design.md` (§ Alternativas).
 - **M1 (MEDIUM) — smoke-check del muro de lectura:** **R3.7 agregada** (abort in-migration si

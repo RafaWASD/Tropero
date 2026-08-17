@@ -8,7 +8,7 @@
 > | 2 — Infra de E2E (globals + fixtures) | ✅ **HECHA** (2026-08-16, `c055e6e`). 96 archivos, 11 globals de window + fixtures. La fila decía `⏳ pendiente` por descuido de esa fase; corregida acá. |
 > | 3 — PowerSync (`rafaq.yaml` → `mitropero.yaml`) | ✅ **HECHA** (2026-08-16). 57 archivos: 145 ocurrencias del literal en 55, más 2 docs editados a criterio. **Sin deploy**: el nombre del archivo fuente es local (el script lo copia a `sync-config.yaml`, que es lo único que ve la instancia). Ver `progress/rebrand-fase3-powersync.md`. |
 > | 4 — GUCs de Postgres | ✅ **HECHA** (2026-08-17). Migración `0132` aplicada a **DEV** (autorización de Raf en sesión; PROD no se tocó): `CREATE OR REPLACE` de las 6 funciones que nombran una GUC, en **una sola transacción**. 9 archivos de spec/doc reconciliados. **Falsificada** (ver abajo). Detalle: `progress/rebrand-fase4-gucs.md`. |
-> | 5 — Headers HTTP | ⏳ pendiente — Gate 1. **Además es lo que hoy tiene el árbol en rojo** |
+> | 5 — Headers HTTP | ✅ **HECHA** (2026-08-17). **Rename en DOS TIEMPOS, no corte seco**: migración `0133` a **DEV** + las 10 Edge Functions redeployadas (autorización de Raf en sesión; PROD no se tocó). El servidor **lee los dos** nombres (`x-mitropero-*` y, si no está, `x-rafaq-*`); cliente y EFs **escriben sólo el nuevo**. La limpieza del fallback es una fase aparte, anotada en `docs/backlog.md` con la condición que la habilita. **Devuelve el árbol a verde** (era el fallo único del baseline). Detalle: `progress/rebrand-fase5-headers.md`. |
 > | 6 — Identidad Expo | 🔴 bloqueada por decisiones de Raf (§6.2) |
 > | Assets (logo) | 🔴 bloqueada: falta el logo real |
 >
@@ -37,7 +37,7 @@
 >
 > | Fase | Identificador nuevo | ¿Dispara la regla B? |
 > |---|---|---|
-> | 5 — headers | `'X-Mitropero-Request-Id'` en `app/src/services/{account,members,push-notifications}.ts` | **SÍ** (`Mitropero` precedido de `-`, no de `__`) → hay que decidir carve-out o válvula |
+> | 5 — headers | `'X-Mitropero-Request-Id'` — hoy en UN solo lugar, `app/src/utils/request-id.ts` (la constante compartida que consumen los tres call-sites) | **SÍ** (`Mitropero` precedido de `-`, no de `__`) → **RESUELTO con VÁLVULA por línea**, no con carve-out: con una sola definición la población es de UNO, y un carve-out de forma ("precedido de `-`" / "empieza con `X-`") eximiría también texto de UI con esa forma. Justificación completa en `progress/rebrand-fase5-headers.md` §5; falsificado con un mutante (sacar la válvula ⇒ regla B roja). |
 > | 4 — GUCs | ~~`set_config('mitropero.is_transfer', …)` en el cliente~~ **no existe** | **No, y no por accidente**: la fase 4 (hecha el 17/08) confirmó que el cliente **no setea ninguna GUC** — el identificador nuevo no aparece en `app/app` ni en `app/src`, así que la regla B ni lo mira. La preocupación del carve-out de DOMINIO era sobre una línea de cliente que nunca existió. |
 > | 6 — Expo | `slug: 'mitropero-app'`, `owner`, `scheme` en `app.config.ts` | **SÍ** (`-a` después, no es dominio ni `__`) |
 >
@@ -186,6 +186,34 @@ Antes y después de cada fase, confirmar contra el baseline actual (2026-08-15):
   animal + el flujo de categorías. Moldear sobre el cuerpo VIGENTE (ver [[reference_function_recreate_base]]).
 
 ### D. Headers HTTP deployados (`X-Rafaq-Request-Id`, `X-Rafaq-Actor`) — 🔴 ALTO riesgo / DEPLOYADO
+
+> ## ✅ HECHA (2026-08-17, migración `0133` + redeploy de las 10 EFs, DEV). Y el "deploy-ordering" de abajo no alcanzaba.
+>
+> **Lo que decía y era insuficiente:** *"Backend (migración + funciones) junto o antes del OTA del frontend."*
+> **No hay OTA.** `app/app.config.ts` no tiene bloque `updates` (expo-updates es Fase 0, pendiente). La
+> única forma de que un cliente instalado cambie de header es que un tester instale una build nueva a mano,
+> y eso puede no pasar nunca — o sea que **ningún orden de deploy** resuelve el skew: con corte seco, el
+> TestFlight y el APK que ya están afuera quedarían escribiendo el nombre viejo por tiempo indefinido y
+> todo lo que hicieran entraría al audit con `request_id` **NULL**. No rompe nada visible: la correlación
+> se pierde **en silencio**, el peor modo de falla para una feature de auditoría.
+>
+> **Lo que se hizo en su lugar — rename en DOS TIEMPOS**: (1) servidor **tolerante**, lee el nombre nuevo y
+> si no está el viejo (`0133` re-CREA los dos resolvers; `_shared/request-headers.ts` es la única
+> definición del lado TS y `cors.ts` **deriva** su Allow-Headers de ahí, así el skew de CORS es imposible
+> por construcción); (2) cliente y admin client escriben **sólo el nuevo**; (3) limpieza del fallback en una
+> fase aparte, anotada en `docs/backlog.md` con su condición. Los dos invariantes de los resolvers quedan
+> intactos y verificados: **TOTAL** (nunca lanzan → no pueden abortar el write del operario) y
+> **SPOOF-SAFE** (el header sólo se lee dentro del gate `request.jwt.claims->>'role' = 'service_role'`; el
+> fallback vive DENTRO de ese gate, no abre canal nuevo).
+>
+> **Falsificado en tres capas** (no es "confío en que anda"): un bloque `DO` **dentro de la migración**
+> ejerce las 8 combinaciones de header y aborta si alguna falla · la suite `audit` pasó de 15 a **20 tests**
+> (TA.17/TA.19 = header VIEJO contra servidor NUEVO se registra igual; TA.20 control negativo; TA.21 spoof
+> con las DOS grafías) · y **antes** de aplicar la migración se corrió la suite a propósito: TA.12/TA.18
+> (nombres nuevos) FALLARON y TA.17/TA.19 (viejos) pasaron — o sea que los tests ejercen el path real.
+>
+> Detalle completo, baseline literal y la decisión del guard de marca: `progress/rebrand-fase5-headers.md`.
+
 - Spec 18 (audit, `X-Rafaq-Actor`) + spec 23 (`X-Rafaq-Request-Id`), **deployados hoy 2026-08-15**.
 - Los leen `audit.resolve_actor()` / `audit.resolve_request_id()` del GUC `request.headers->>'x-rafaq-actor'`
   / `'x-rafaq-request-id'` (migraciones 0124 + 0131). Los setean: cliente

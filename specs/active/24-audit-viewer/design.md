@@ -6,6 +6,9 @@
 >
 > **Naming:** identificadores nuevos = `miTropero`/`mitropero`. Reutilizado: `serveEf` manda
 > `X-Rafaq-Request-Id` (deuda de rebrand — NO se toca acá).
+> **[RECONCILIADO 2026-08-17]** La deuda se pagó en la **fase 5 del rebrand** (migración `0133`): hoy
+> `serveEf` manda —y lee— `X-Mitropero-Request-Id`, y el servidor acepta ADEMÁS el nombre viejo mientras
+> queden builds instaladas sin OTA. `audit_query` no cambió: sigue reutilizando `serveEf` tal cual.
 
 ## 0. Resumen de la arquitectura
 
@@ -55,7 +58,10 @@ se expone el schema ni se agregan grants — la EF conecta con la credencial de 
 
 > Nota: `_shared/cors.ts` hoy permite `Access-Control-Allow-Origin: *` y `Allow-Methods: POST, OPTIONS`, que
 > ya sirve. **No se agrega** ningún header nuevo a la allowlist de CORS (el cliente solo manda
-> `authorization`/`content-type`, ya presentes). No se reusa/duplica `X-Rafaq-Request-Id`.
+> `authorization`/`content-type`, ya presentes). No se reusa/duplica el header de correlación.
+> **[RECONCILIADO 2026-08-17, rebrand fase 5]** la allowlist de CORS ya no se escribe a mano: `cors.ts` la
+> DERIVA de `ACCEPTED_REQUEST_ID_HEADERS` (`_shared/request-headers.ts`). Sigue sin agregarse nada por esta
+> feature; lo que cambió es de dónde sale la lista.
 
 ## 2. Edge Function `audit_query`
 
@@ -328,8 +334,9 @@ la app RN, no toca PowerSync). Se documenta la no-aplicabilidad explícitamente 
 7. **Página en `docs/internal/audit-viewer/`** — paralelo a `docs/marketing/landing-proximamente/`
    (precedente de estático versionado en el repo servido por Cloudflare). Alternativa: `web/` top-level;
    descartada por consistencia con el precedente existente.
-8. **Se reutiliza `serveEf` tal cual** (manda `X-Rafaq-Request-Id`) — no se duplica ni renombra; el rebrand
-   del header es una fase global aparte (`docs/rebrand-mitropero-plan.md` §D).
+8. **Se reutiliza `serveEf` tal cual** — no se duplica ni renombra; el rebrand del header fue una fase
+   global aparte (`docs/rebrand-mitropero-plan.md` §D), **ejecutada el 2026-08-17**: `serveEf` manda hoy
+   `X-Mitropero-Request-Id` y acepta también el nombre viejo. `audit_query` heredó el cambio sin tocarse.
 
 ## 7. Foco de Gate 1 (security_analyzer modo spec)
 

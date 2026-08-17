@@ -88,6 +88,17 @@ async function adminQuery(sql) {
 const RUN_TAG = `audit_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD = 'TestPassword!Aa1';
 
+// ── Nombres de los headers de wire (rebrand fase 5, migración 0133) ──────────────────────────────────
+// El servidor LEE los DOS: el nuevo y el de transición. La app y las Edge Functions ESCRIBEN sólo el
+// nuevo. Los nombres están escritos a mano acá A PROPÓSITO (no importados de
+// `supabase/functions/_shared/request-headers.ts`): esta suite es la que ejerce el camino REAL contra la
+// base, así que si alguien renombra de un solo lado —el TS sin el SQL, o al revés— se tiene que poner
+// roja. Un espejo importado del mismo módulo se movería junto con el bug y no vería nada.
+const ACTOR_HEADER = 'X-Mitropero-Actor';
+const REQUEST_ID_HEADER = 'X-Mitropero-Request-Id';
+const LEGACY_ACTOR_HEADER = 'X-Rafaq-Actor';
+const LEGACY_REQUEST_ID_HEADER = 'X-Rafaq-Request-Id';
+
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -141,7 +152,7 @@ async function auditRows(whereSql, { tries = 5, delay = 300 } = {}) {
   let rows = [];
   for (let i = 0; i < tries; i++) {
     rows = await adminQuery(
-      `select id, op, auth_uid, record_id, old_record_id, record, old_record
+      `select id, op, auth_uid, request_id, record_id, old_record_id, record, old_record
          from audit.record_version
         where ${whereSql}
         order by id asc;`);
@@ -319,11 +330,12 @@ test('audit forense suite — spec 18', async (t) => {
   });
 
   // ── TA.12 actor Opción A por el CAMINO DE PRODUCCIÓN (service_role + header) — R2.6/R5.1/R7.4a ─────
-  await t.test('TA.12 service_role + header X-Rafaq-Actor → auth_uid = actor (camino de la EF)', async () => {
+  await t.test('TA.12 service_role + header X-Mitropero-Actor → auth_uid = actor (camino de la EF)', async () => {
     // Reproduce EXACTAMENTE lo que hace la EF: createAdminClient(actorId) = service_role + header global.
+    // Rebrand fase 5 (0133): el nombre que ESCRIBE la EF hoy es el nuevo; el viejo lo cubre TA.17.
     const svcWithActor = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
-      global: { headers: { 'X-Rafaq-Actor': ownerA.id } },
+      global: { headers: { [ACTOR_HEADER]: ownerA.id } },
     });
     const roleB = crypto.randomUUID();
     const { error } = await svcWithActor.from('user_roles').insert({
@@ -337,11 +349,11 @@ test('audit forense suite — spec 18', async (t) => {
   });
 
   // ── TA.13 spoof-safety: authenticated con header forjado → auth.uid() real, NO el header — R2.8/R7.4c
-  await t.test('TA.13 authenticated con X-Rafaq-Actor forjado → auth_uid = su uid real (spoof-safe)', async () => {
+  await t.test('TA.13 authenticated con X-Mitropero-Actor forjado → auth_uid = su uid real (spoof-safe)', async () => {
     const forged = userB.id;   // un uuid claramente distinto del owner
     assert.notEqual(forged, ownerA.id);
     // Cliente authenticated (owner) con el header forjado inyectado globalmente.
-    const spoofClient = await getUserClient(ownerA.email, { 'X-Rafaq-Actor': forged });
+    const spoofClient = await getUserClient(ownerA.email, { [ACTOR_HEADER]: forged });
     // Baseline: max id de audit ANTES del write (para aislar la versión nueva de la de TA.3).
     const before = await adminQuery(`select coalesce(max(id),0) as m from audit.record_version;`);
     const baseId = Number(before[0].m);
@@ -419,6 +431,185 @@ test('audit forense suite — spec 18', async (t) => {
     const r = rows[0];
     for (const [k, v] of Object.entries(r)) {
       assert.equal(v, false, `${k} debe ser false (EXECUTE revocado a clientes)`);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+  // TA.17–TA.21 — REBRAND FASE 5: el rename de header en DOS TIEMPOS (migración 0133)
+  //
+  // El servidor acepta el nombre NUEVO (`X-Mitropero-*`) y, si no vino, el VIEJO (`X-Rafaq-*`). Sin esto,
+  // toda build ya instalada —TestFlight + el APK de los testers, y NO hay OTA— escribiría en el audit con
+  // `actor`/`request_id` NULL: no rompe nada visible, la correlación se pierde EN SILENCIO. TA.17/TA.19
+  // son LA falsificación de que la tolerancia existe de verdad; TA.20 es el control negativo (sin header
+  // no aparece un request_id de la nada) y TA.21 cierra el flanco que la tolerancia podría haber abierto:
+  // que el fallback NO sea un canal de spoof.
+  //
+  // Los writes usan `active: false` a propósito: `user_roles_active_unique` (0003) es un índice único
+  // parcial sobre (user_id, establishment_id) WHERE active — con `true` colisionarían con TA.12.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+  // ── TA.17 tolerancia del ACTOR: header VIEJO contra servidor NUEVO → se registra igual ─────────────
+  await t.test('TA.17 service_role + header VIEJO X-Rafaq-Actor → auth_uid = actor (cliente sin actualizar)', async () => {
+    const svcLegacy = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { [LEGACY_ACTOR_HEADER]: ownerA.id } },
+    });
+    const roleId = crypto.randomUUID();
+    const { error } = await svcLegacy.from('user_roles').insert({
+      id: roleId, user_id: userB.id, establishment_id: estA, role: 'veterinarian', active: false,
+    });
+    assert.equal(error, null, error && error.message);
+    const rows = await auditRows(
+      `table_name = 'user_roles' and op = 'INSERT' and record ->> 'id' = '${roleId}'`);
+    assert.equal(rows.length, 1, 'debería haber 1 versión INSERT');
+    assert.equal(
+      rows[0].auth_uid, ownerA.id,
+      'el nombre VIEJO del header de actor tiene que seguir resolviendo: si no, todo lo que haga una ' +
+      'build ya instalada entra al audit con actor NULL y nadie se entera',
+    );
+  });
+
+  // ── TA.18 request_id con el nombre NUEVO (camino de la EF de hoy) — R3.7/R3.8 de spec 23 ──────────
+  await t.test('TA.18 service_role + X-Mitropero-Request-Id → request_id aterriza en la fila de audit', async () => {
+    const rid = crypto.randomUUID();
+    const svcNew = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { [ACTOR_HEADER]: ownerA.id, [REQUEST_ID_HEADER]: rid } },
+    });
+    const roleId = crypto.randomUUID();
+    const { error } = await svcNew.from('user_roles').insert({
+      id: roleId, user_id: userB.id, establishment_id: estA, role: 'field_operator', active: false,
+    });
+    assert.equal(error, null, error && error.message);
+    const rows = await auditRows(
+      `table_name = 'user_roles' and op = 'INSERT' and record ->> 'id' = '${roleId}'`);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].request_id, rid, 'request_id = el uuid del header nuevo');
+    assert.equal(rows[0].auth_uid, ownerA.id, 'y el actor nuevo también, en la misma fila');
+  });
+
+  // ── TA.19 tolerancia del REQUEST_ID: header VIEJO contra servidor NUEVO → se registra igual ────────
+  await t.test('TA.19 service_role + header VIEJO X-Rafaq-Request-Id → request_id se registra igual', async () => {
+    const rid = crypto.randomUUID();
+    const svcLegacy = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { [LEGACY_ACTOR_HEADER]: ownerA.id, [LEGACY_REQUEST_ID_HEADER]: rid } },
+    });
+    const roleId = crypto.randomUUID();
+    const { error } = await svcLegacy.from('user_roles').insert({
+      id: roleId, user_id: userD.id, establishment_id: estA, role: 'field_operator', active: false,
+    });
+    assert.equal(error, null, error && error.message);
+    const rows = await auditRows(
+      `table_name = 'user_roles' and op = 'INSERT' and record ->> 'id' = '${roleId}'`);
+    assert.equal(rows.length, 1);
+    assert.equal(
+      rows[0].request_id, rid,
+      'el nombre VIEJO del header de correlación tiene que seguir resolviendo — es EL invariante del ' +
+      'rename en dos tiempos (sin OTA, esos clientes no se pueden actualizar a mano)',
+    );
+    assert.equal(rows[0].auth_uid, ownerA.id, 'y el actor viejo también');
+  });
+
+  // ── TA.20 CONTROL NEGATIVO: sin ningún header → auth_uid y request_id NULL ─────────────────────────
+  await t.test('TA.20 service_role SIN headers propios → auth_uid y request_id NULL (control negativo)', async () => {
+    // Sin esto, TA.17–TA.19 podrían estar verdes por cualquier motivo (un default, un valor pegado de
+    // otra fila): el control fija que el valor viene DEL HEADER y no de otro lado.
+    const roleId = crypto.randomUUID();
+    const { error } = await admin.from('user_roles').insert({
+      id: roleId, user_id: userD.id, establishment_id: estA, role: 'veterinarian', active: false,
+    });
+    assert.equal(error, null, error && error.message);
+    const rows = await auditRows(
+      `table_name = 'user_roles' and op = 'INSERT' and record ->> 'id' = '${roleId}'`);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].auth_uid, null, 'sin header de actor y sin JWT de usuario → NULL honesto');
+    assert.equal(rows[0].request_id, null, 'sin header de correlación → NULL honesto');
+  });
+
+  // ── TA.21 el FALLBACK no abre un canal de spoof: authenticated forjando las DOS grafías ────────────
+  await t.test('TA.21 authenticated forjando los headers VIEJOS y nuevos → ignorados (el fallback no es un agujero)', async () => {
+    const forged = userB.id;
+    const forgedRid = crypto.randomUUID();
+    assert.notEqual(forged, ownerA.id);
+    // Un atacante que sepa del rename probaría las DOS grafías: se mandan las cuatro juntas.
+    const spoofClient = await getUserClient(ownerA.email, {
+      [ACTOR_HEADER]: forged,
+      [LEGACY_ACTOR_HEADER]: forged,
+      [REQUEST_ID_HEADER]: forgedRid,
+      [LEGACY_REQUEST_ID_HEADER]: forgedRid,
+    });
+    const before = await adminQuery(`select coalesce(max(id),0) as m from audit.record_version;`);
+    const baseId = Number(before[0].m);
+    const { error } = await spoofClient.from('user_roles').update({ active: true }).eq('id', roleA_owner);
+    assert.equal(error, null, error && error.message);
+    const rows = await auditRows(
+      `id > ${baseId} and table_name = 'user_roles' and op = 'UPDATE' and record ->> 'id' = '${roleA_owner}'`);
+    assert.ok(rows.length >= 1, 'debería haber la versión UPDATE del write spoof');
+    const v = rows[rows.length - 1];
+    assert.equal(v.auth_uid, ownerA.id, 'auth_uid = el uid REAL (auth.uid), no ninguno de los dos headers');
+    assert.notEqual(v.auth_uid, forged, 'el actor forjado —en cualquiera de las dos grafías— se ignora');
+    assert.equal(v.request_id, null, 'un authenticated no puede inyectar request_id con NINGUNA grafía');
+  });
+
+  // ── TA.22 END-TO-END por la Edge Function, con las DOS grafías ─────────────────────────────────────
+  //
+  // TA.17–TA.20 ejercen el último tramo (PostgREST → trigger). Este ejerce la CADENA ENTERA, que es donde
+  // vive de verdad la tolerancia que le sirve a un cliente ya instalado:
+  //
+  //   app vieja  --HTTP `X-Rafaq-Request-Id`-->  serveEf (lo lee: readRequestIdHeader)
+  //              --admin client, `X-Mitropero-Request-Id`-->  PostgREST  -->  audit.record_version
+  //
+  // O sea: el header viejo del cliente NO llega a la base con el nombre viejo — lo atrapa la EF y lo
+  // re-emite con el nombre nuevo. Si `serveEf` no leyera el nombre viejo, el wrapper generaría un id
+  // server-side y la fila de audit quedaría con un `request_id` que NO es el que la app puso en su evento
+  // de dominio: la correlación se rompe **sin ningún síntoma** (hay un uuid, y es el equivocado). Eso no lo
+  // puede ver ninguno de los tests de arriba, porque todos entran por PostgREST directo.
+  //
+  // Se recorre la LISTA de grafías, no dos casos escritos a mano: una grafía nueva aceptada por el
+  // servidor que nadie ejercite de punta a punta es exactamente el agujero que este test existe para tapar.
+  // ⚠️ Requiere `invite_user` + `accept_invitation` DEPLOYADAS (ya es pre-condición de esta suite).
+  await t.test('TA.22 end-to-end por la EF: el requestId del cliente (grafía nueva Y vieja) llega al audit', async () => {
+    for (const headerName of [REQUEST_ID_HEADER, LEGACY_REQUEST_ID_HEADER]) {
+      const rid = crypto.randomUUID();
+
+      // (1) Invitación SIN email (ADR-014): así el accept no depende del binding de email verificado.
+      const { data: inv, error: invErr } = await clientA.functions.invoke('invite_user', {
+        body: { establishment_id: estA, role: 'veterinarian' },
+      });
+      assert.equal(invErr, null, invErr && invErr.message);
+      assert.ok(inv && inv.token, `invite_user debería devolver el token (${headerName})`);
+
+      // (2) Un usuario NUEVO acepta mandando SOLO ese header — lo que hace la app real (una build vieja
+      //     manda la grafía vieja y no hay forma de actualizarla). accept_invitation escribe `user_roles`,
+      //     que está trackeada en modo estricto.
+      const invitee = await createTestUser(`invitee_${headerName.toLowerCase().replace(/[^a-z0-9]/g, '')}`);
+      const inviteeClient = await getUserClient(invitee.email);
+      const before = await adminQuery(`select coalesce(max(id),0) as m from audit.record_version;`);
+      const baseId = Number(before[0].m);
+      const { data: acc, error: accErr } = await inviteeClient.functions.invoke('accept_invitation', {
+        body: { token: inv.token },
+        headers: { [headerName]: rid },
+      });
+      assert.equal(accErr, null, accErr && accErr.message);
+      assert.equal(acc.establishment_id, estA, `accept_invitation debería sumar al invitado (${headerName})`);
+
+      // (3) La fila de audit de ESE INSERT lleva el requestId que mandó el cliente, no uno inventado.
+      const rows = await auditRows(
+        `id > ${baseId} and table_name = 'user_roles' and op = 'INSERT'
+           and record ->> 'user_id' = '${invitee.id}'`);
+      assert.equal(rows.length, 1, `esperaba 1 versión INSERT del rol del invitado (${headerName})`);
+      assert.equal(
+        rows[0].request_id, rid,
+        `el requestId que el cliente mandó en ${headerName} tiene que ser EL MISMO que quedó en el audit. ` +
+        'Si acá hay otro uuid, la EF lo descartó y generó uno server-side: la correlación con el evento de ' +
+        'dominio de la app se rompió sin dejar ningún síntoma visible.',
+      );
+      assert.equal(rows[0].auth_uid, invitee.id, `el actor = quien aceptó, propagado por la EF (${headerName})`);
+
+      // Se desactiva el rol para no chocar con user_roles_active_unique en la vuelta siguiente del loop.
+      await admin.from('user_roles').update({ active: false })
+        .eq('user_id', invitee.id).eq('establishment_id', estA);
     }
   });
 });

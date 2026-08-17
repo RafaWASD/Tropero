@@ -22,13 +22,13 @@ server → qué filas cambiaron y quién → qué reportó el cliente.
 ## Alcance — lo que SÍ (Completo)
 
 1. **Cliente → header.** Generar un `requestId` (uuid v4) por acción y mandarlo como header
-   `X-Rafaq-Request-Id` en las llamadas a Edge Functions (al lado del mecanismo de actor ya
+   `X-Mitropero-Request-Id` en las llamadas a Edge Functions (al lado del mecanismo de actor ya
    existente).
 2. **Wrapper de Edge Functions** en `_shared/`:
-   - (a) Lee el `X-Rafaq-Request-Id` entrante; si no viene (app vieja), **genera uno server-side**
+   - (a) Lee el `X-Mitropero-Request-Id` entrante; si no viene (app vieja), **genera uno server-side**
      para no perder la traza.
    - (b) Lo **reenvía al admin client** para que llegue al trigger de audit (igual que hoy se
-     reenvía `X-Rafaq-Actor`).
+     reenvía `X-Mitropero-Actor`).
    - (c) Emite **dos líneas JSON estructuradas** por llamada — entrada (`requestId`, función,
      actor, tamaño de body) y salida (status, código de error, duración ms). **Sin body.** Van a
      los logs de Edge Functions de Supabase (ya se capturan y son consultables). Sin store nuevo.

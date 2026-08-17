@@ -9,10 +9,10 @@ Una acción de usuario nace con un `requestId` (uuid v4) que viaja por las front
 
 ```
 cliente (genera requestId)
-  │  header X-Rafaq-Request-Id
+  │  header X-Mitropero-Request-Id
   ▼
 Edge Function  ── wrapper serveEf ──▶ console.log ENTRADA/SALIDA (JSON, sin body) → logs de EF
-  │  createAdminClient(actor, requestId) → header global X-Rafaq-Request-Id
+  │  createAdminClient(actor, requestId) → header global X-Mitropero-Request-Id
   ▼
 PostgREST → GUC request.headers → audit.resolve_request_id() (solo service_role)
   ▼
@@ -50,7 +50,7 @@ hasta T12). La columna se agrega igual desde ahora para dejar el terreno listo.
 ### Modificar
 
 - `supabase/functions/_shared/supabase.ts` — `createAdminClient(actorId?, requestId?)` aditivo (R2.12).
-- `supabase/functions/_shared/cors.ts` — agregar `x-rafaq-request-id` a `Access-Control-Allow-Headers` (R2.13).
+- `supabase/functions/_shared/cors.ts` — agregar `x-mitropero-request-id` a `Access-Control-Allow-Headers` (R2.13).
 - Las 9 EFs (`invite_user`, `accept_invitation`, `change_member_role`, `remove_member`, `cancel_invitation`,
   `resend_invitation`, `delete_account`, `register_push_token`, `health`) — migran a `serveEf` (R2.10) y las 3
   que escriben `user_roles` pasan `ctx.requestId` a `createAdminClient` (R3.10).
@@ -97,7 +97,7 @@ ids falsos.
 --
 -- QUÉ AGREGA (todo aditivo — no rompe ningún write existente):
 --   1. Columna audit.record_version.request_id uuid NULLABLE + índice parcial (where request_id is not null).
---   2. Función audit.resolve_request_id() ANÁLOGA a resolve_actor(): lee request.headers->>'x-rafaq-request-id'
+--   2. Función audit.resolve_request_id() ANÁLOGA a resolve_actor(): lee request.headers->>'x-mitropero-request-id'
 --      del GUC SOLO bajo service_role, valida uuid, TOTAL (nunca lanza) → NULL ante cualquier fallo.
 --   3. Re-CREATE de audit.insert_update_delete_trigger() sumando request_id al INSERT en AMBOS modos.
 --
@@ -118,10 +118,15 @@ create index if not exists record_version_request_id
 -- El header SOLO se confía si el rol de sesión es service_role (GUC request.jwt.claims, no current_user →
 -- correcto bajo SECURITY DEFINER; anti-spoof). Sin fallback a auth.uid(): un request_id no tiene equivalente
 -- de "usuario logueado" → si no hay header confiable, NULL honesto.
+-- ⚠️ AS-BUILT (rebrand fase 5, 2026-08-17, migración 0133): el cuerpo VIGENTE lee los DOS nombres de
+--    header. El de abajo es el as-built literal; la versión original de 0131 leía sólo 'x-rafaq-request-id'
+--    (0131 no se editó: append-only).
 create or replace function audit.resolve_request_id ()
 returns uuid language plpgsql stable set search_path = '' as $$
 declare
+  c_uuid constant text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
   v_role text;
+  v_hdrs jsonb;
   v_hdr  text;
   v_rid  uuid;
 begin
@@ -129,8 +134,13 @@ begin
     v_role := nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role';
     if v_role = 'service_role' then
       -- PostgREST expone request.headers con las claves en minúscula.
-      v_hdr := nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-rafaq-request-id';
-      if v_hdr ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+      v_hdrs := nullif(current_setting('request.headers', true), '')::jsonb;
+      -- Rename en DOS TIEMPOS: gana el NUEVO; se cae al VIEJO si el nuevo falta o no es un uuid.
+      v_hdr := v_hdrs ->> 'x-mitropero-request-id';
+      if v_hdr is null or v_hdr !~ c_uuid then
+        v_hdr := v_hdrs ->> 'x-rafaq-request-id';
+      end if;
+      if v_hdr ~ c_uuid then
         v_rid := v_hdr::uuid;
       end if;
     end if;
@@ -240,9 +250,12 @@ export function serveEf(fn: string, handler: EfHandler): void;
 
 Comportamiento:
 
-1. **requestId (R2.2/R2.3/R2.4).** `const incoming = req.headers.get('X-Rafaq-Request-Id');` → si matchea la
+1. **requestId (R2.2/R2.3/R2.4).** `const incoming = readRequestIdHeader(req);` → si matchea la
    regex de uuid v4, se usa; si no (ausente o basura), `crypto.randomUUID()` server-side (Deno lo tiene
    nativo). El valor resuelto es el que se loguea, se pasa al handler, y (vía el handler) al admin client.
+   **[AS-BUILT rebrand fase 5]** era `req.headers.get('X-Rafaq-Request-Id')`. Hoy la lectura pasa por
+   `readRequestIdHeader` de `_shared/request-headers.ts`, que acepta `X-Mitropero-Request-Id` y, si no vino,
+   `X-Rafaq-Request-Id` (hay builds instaladas sin OTA). La validación de forma no cambió.
 2. **ENTRADA (R2.6).** `console.log(JSON.stringify({ evt: 'ef_in', fn, requestId, bodyBytes, actor }))`.
    - `bodyBytes` = `Number(req.headers.get('content-length')) || null` — **NO se lee el body** (evita
      consumirlo antes del handler y evita cualquier riesgo de leak; R2.8).
@@ -286,8 +299,10 @@ es input-free y sin user → solo logging.
 export function createAdminClient(actorId?: string, requestId?: string): SupabaseClient {
   // ...url/serviceRoleKey igual...
   const headers: Record<string, string> = {};
-  if (actorId)   headers['X-Rafaq-Actor'] = actorId;
-  if (requestId) headers['X-Rafaq-Request-Id'] = requestId;
+  // [AS-BUILT rebrand fase 5] los nombres salen de `_shared/request-headers.ts` (ACTOR_HEADER /
+  // REQUEST_ID_HEADER), no de literales: el admin client ESCRIBE sólo la grafía nueva.
+  if (actorId)   headers[ACTOR_HEADER] = actorId;
+  if (requestId) headers[REQUEST_ID_HEADER] = requestId;
   return createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
     ...(Object.keys(headers).length ? { global: { headers } } : {}),
@@ -299,14 +314,23 @@ Sin `requestId` (ni `actorId`) el shape es idéntico al actual → sin regresió
 
 ### CORS (R2.13)
 
-`_shared/cors.ts` → `Access-Control-Allow-Headers` pasa a incluir `x-rafaq-request-id`:
+`_shared/cors.ts` → `Access-Control-Allow-Headers` pasa a incluir el header de correlación:
 
 ```
-'authorization, x-client-info, apikey, content-type, x-rafaq-request-id'
+'authorization, x-client-info, apikey, content-type, x-mitropero-request-id, x-rafaq-request-id'
 ```
 
 Sin esto el preflight del navegador (web / E2E Playwright) rechazaría la llamada con el header nuevo. En
 nativo no hay CORS, pero E2E corre en web → es necesario.
+
+> **[AS-BUILT rebrand fase 5, 2026-08-17]** La lista **ya no se escribe a mano**: `cors.ts` la **DERIVA**
+> de `ACCEPTED_REQUEST_ID_HEADERS` (`_shared/request-headers.ts`), que es la misma lista que recorre
+> `readRequestIdHeader`. Motivo: el modo de falla de esta sección es exactamente que el preflight y el
+> lector se desalineen —un header que la EF lee pero el navegador no puede mandar—, y en nativo no hay
+> preflight así que sólo se ve en web. Derivándola, las dos puntas se mueven juntas o ninguna, y
+> `request-headers.test.ts` lo verifica recorriendo la lista (no una enumeración a mano). Los headers de
+> ACTOR **no** están en la lista a propósito: no vienen del caller, los mintea la EF.
+> El string de arriba es el valor real que devuelve hoy el preflight de DEV (verificado con `curl -X OPTIONS`).
 
 > **Deploy-ordering (VERIFICADO por experimento E2E 2026-08-15).** El frontend (que manda el header) y el
 > backend (CORS + funciones) deben deployarse **juntos, o el backend primero**. Si el OTA del frontend sale
@@ -337,7 +361,7 @@ polyfill ya cubre el fallback — no lo re-implementamos acá.
 Call-sites (R1.4): en cada uno se genera `const requestId = newRequestId()` al inicio de la acción y se pasa
 en dos lugares: (a) header de la EF, (b) tag/prop de observabilidad.
 
-- `members.ts` `invokeFn` → `supabase.functions.invoke(name, { body, headers: { 'X-Rafaq-Request-Id': requestId } })`
+- `members.ts` `invokeFn` → `supabase.functions.invoke(name, { body, headers: { 'X-Mitropero-Request-Id': requestId } })`
   (supabase-js v2 acepta `{ body, headers }`).
 - `account.ts` `deleteAccount` → idem con `body: {}`.
 - `push-notifications.ts` `registerPushTokenBestEffort` → idem.
@@ -466,5 +490,5 @@ Puntos que un auditor debería mirar, con la postura tomada:
 5. **Migración aditiva fail-closed.** Columna NULLABLE (no rompe writes), revoke EXECUTE de la función nueva +
    smoke-check que aborta si quedó EXECUTE-able por cliente o si el muro de lectura se abrió. Preserva grants
    y patrón de 0124.
-6. **CORS.** Se agrega `x-rafaq-request-id` a los headers permitidos; es un header propio de correlación, no
+6. **CORS.** Se agrega `x-mitropero-request-id` a los headers permitidos; es un header propio de correlación, no
    una credencial — no amplía superficie de auth.

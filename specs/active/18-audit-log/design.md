@@ -12,7 +12,7 @@
 | Archivo | Acción | Qué |
 |---|---|---|
 | `supabase/migrations/0124_audit_log.sql` | **crear** | Schema `audit` vendoreado + `record_version` append-only (sin FK/CHECK) + helpers + `enable/disable_tracking(regclass, best_effort)` + trigger `SECURITY DEFINER` que resuelve el **actor real** (header guardado por rol + `auth.uid()`) y respeta el modo best-effort/estricto + REVOKEs + smoke-check doble (EXECUTE **y** muro de lectura) + `enable_tracking('public.user_roles', strict)` + `enable_tracking('public.animals', best_effort)` + retención `pg_cron` mensual. `BEGIN/COMMIT`. Header documenta la semántica temporal (R2.5). **NO auto-aplicar**: deploy gateado tras Gate 1 re-run + Puerta 1. |
-| `supabase/functions/_shared/supabase.ts` | **modificar** | `createAdminClient(actorId?: string)` — si viene `actorId`, agrega el header global `X-Rafaq-Actor` a TODAS las requests del admin client. Cambio aditivo (default sin header = comportamiento actual). |
+| `supabase/functions/_shared/supabase.ts` | **modificar** | `createAdminClient(actorId?: string)` — si viene `actorId`, agrega el header global `X-Mitropero-Actor` a TODAS las requests del admin client. Cambio aditivo (default sin header = comportamiento actual). |
 | `supabase/functions/accept_invitation/index.ts` | **modificar** | Crear el admin client con el actor (`createAdminClient(user.id)`) tras `requireUser`; reordenar si hace falta. Sin cambio de contrato ni de lógica (R8.3). |
 | `supabase/functions/change_member_role/index.ts` | **modificar** | Ídem — `createAdminClient(user.id)` (el owner). |
 | `supabase/functions/remove_member/index.ts` | **modificar** | Ídem — `createAdminClient(user.id)` (el owner). |
@@ -75,7 +75,7 @@ Tres hechos que no hay que confundir:
    - Writes por **Edge Function con `service_role`** (las mutaciones de `user_roles`: invitaciones,
      cambios de rol, bajas, borrado de cuenta): `auth.uid()` sería **NULL** (el admin client no manda
      JWT de usuario). Por eso **[Gate 1 H1 / Opción A]** la EF propaga el actor por el header
-     `X-Rafaq-Actor` y el trigger lo usa **solo si el rol de sesión es `service_role`** (R2.6/R2.8). El
+     `X-Mitropero-Actor` y el trigger lo usa **solo si el rol de sesión es `service_role`** (R2.6/R2.8). El
      actor es el `user.id` del **JWT validado del llamante** (`requireUser`), NUNCA del body (R2.7) → no
      spoofeable. Un cliente `authenticated` que forje el header es **ignorado** (su rol no es
      service_role) → su write se atribuye a su `auth.uid()` real (R2.8).
@@ -114,9 +114,12 @@ por tabla**.
 -- SEMÁNTICA TEMPORAL + ACTOR (D2 + H1 — leer antes de usar el log):
 --   * auth_uid = el ACTOR REAL:
 --       - write con JWT de usuario (RPC/PowerSync) → auth.uid().
---       - write por Edge Function (service_role) → actor propagado por el header X-Rafaq-Actor, usado
+--       - write por Edge Function (service_role) → actor propagado por el header X-Mitropero-Actor, usado
 --         SOLO si el rol de sesión es service_role (un usuario no puede spoofear el header). El actor
 --         es el user.id del JWT validado del llamante de la EF, no del body.
+--         [rebrand fase 5 / 0133: se acepta ADEMÁS el nombre viejo X-Rafaq-Actor, dentro del MISMO gate
+--          de service_role, mientras queden builds instaladas escribiéndolo — no hay OTA. El literal de
+--          la migración 0124 dice el nombre viejo: es append-only y no se edita.]
 --     Vale aun con SECURITY DEFINER (auth.uid()/request.headers/request.jwt.claims son GUCs de sesión,
 --     no cambian con el privilegio del definer).
 --   * ts = hora del SYNC (cuándo llegó al server), NO cuándo pasó la acción. El "cuándo pasó" real vive
@@ -177,19 +180,29 @@ $$;
 -- cuerpo va envuelto en exception → ni el parse de la claim de rol ni del header pueden trabar el write
 -- trackeado (belt-and-suspenders con el guard best-effort del trigger). Regex UUID estricto + cast bajo el
 -- mismo guard. El header SOLO se confía si el rol de sesión es service_role (anti-spoof R2.8).
+-- ⚠️ AS-BUILT (rebrand fase 5, 2026-08-17, migración 0133): el cuerpo VIGENTE lee los DOS nombres de
+--    header. El de abajo es el as-built literal; la versión original de 0124 leía sólo 'x-rafaq-actor'.
 create or replace function audit.resolve_actor ()
 returns uuid language plpgsql stable set search_path = '' as $$
 declare
-  v_role     text;
-  v_hdr      text;
-  v_actor    uuid;
+  c_uuid  constant text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+  v_role  text;
+  v_hdrs  jsonb;
+  v_hdr   text;
+  v_actor uuid;
 begin
   begin
     v_role := nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role';
     if v_role = 'service_role' then
       -- request.headers: PostgREST lo expone con las claves en minúscula.
-      v_hdr := nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-rafaq-actor';
-      if v_hdr ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+      v_hdrs := nullif(current_setting('request.headers', true), '')::jsonb;
+      -- Rename en DOS TIEMPOS: gana el nombre NUEVO; se cae al VIEJO si el nuevo falta o no es un uuid
+      -- (hay builds instaladas sin OTA que siguen mandando 'x-rafaq-actor').
+      v_hdr := v_hdrs ->> 'x-mitropero-actor';
+      if v_hdr is null or v_hdr !~ c_uuid then
+        v_hdr := v_hdrs ->> 'x-rafaq-actor';
+      end if;
+      if v_hdr ~ c_uuid then
         v_actor := v_hdr::uuid;
       end if;
     end if;
@@ -353,7 +366,7 @@ commit;
 ## Cambio en las Edge Functions (Opción A — [Gate 1 H1])
 
 **Contrato:** `createAdminClient(actorId?: string)` en `_shared/supabase.ts` — cuando llega `actorId`,
-agrega `global.headers['X-Rafaq-Actor'] = actorId`. Aditivo (sin arg = igual que hoy). Es el ÚNICO canal
+agrega `global.headers['X-Mitropero-Actor'] = actorId`. Aditivo (sin arg = igual que hoy). Es el ÚNICO canal
 per-request y **misma-transacción** que tiene supabase-js: PostgREST expone cada header entrante como
 `request.headers` (GUC transaction-local, seteado al inicio de la transacción de CADA request) → el
 trigger lo ve en la misma transacción del DML, sin importar que cada `.from().update()` / `.rpc()` sea
@@ -387,7 +400,7 @@ write a tabla trackeada).
 incremento). Corrección al alcance del reporte (que listó 5 EFs); son **4**.
 
 **Anti-spoof (R2.7/R2.8):** el actor sale de `requireUser` (JWT validado), no del body. Un cliente
-`authenticated` que forje `X-Rafaq-Actor` en su propio write es ignorado porque su rol no es
+`authenticated` que forje `X-Mitropero-Actor` en su propio write es ignorado porque su rol no es
 `service_role` (el guard de `resolve_actor`). El header solo se confía en contexto service_role, que solo
 tiene la EF (la key nunca va al browser).
 
@@ -437,15 +450,15 @@ supabase-js `.schema('audit')` con `anon`/`authenticated`.
 | TA.9 grants lectura | `has_table_privilege` anon/authenticated SELECT = false; `has_schema_privilege` USAGE = false | R3.1, R3.7 |
 | TA.10 append-only | anon/authenticated sin UPDATE/DELETE privilege sobre audit | R1.8 |
 | TA.11 WAL frontier | **[as-built]** `audit` NO referenciada en `sync-streams/mitropero.yaml` (frontier real, sin catch-all) + `animals` sin trigger de audit (gate pendiente); la publication es `FOR ALL TABLES` (documentado) | R4.2, R4.3 |
-| **TA.12 actor Opción A (prod-path)** | **service_role client con header `X-Rafaq-Actor` → INSERT `user_roles` → audit.auth_uid = actor** (camino REAL de la EF; no falso verde) | R2.6, R5.1, R7.4a |
-| **TA.13 spoof-safety** | **[as-built]** **`authenticated` con header `X-Rafaq-Actor` forjado → UPDATE de su propia fila de `user_roles` (policy `user_roles_update_owner`) → auth_uid = su auth.uid() real, NO el header** | R2.8, R7.4c |
+| **TA.12 actor Opción A (prod-path)** | **service_role client con header `X-Mitropero-Actor` → INSERT `user_roles` → audit.auth_uid = actor** (camino REAL de la EF; no falso verde) | R2.6, R5.1, R7.4a |
+| **TA.13 spoof-safety** | **[as-built]** **`authenticated` con header `X-Mitropero-Actor` forjado → UPDATE de su propia fila de `user_roles` (policy `user_roles_update_owner`) → auth_uid = su auth.uid() real, NO el header** | R2.8, R7.4c |
 | TA.14 best-effort vs estricto | (documental/comportamental) `animals` best-effort no bloquea; `user_roles` estricto — verificar `tg_argv` del trigger vía `adminQuery` a `pg_trigger` | R1.11 |
 | TA.15 retención | fila con `ts` backdateada >90d → `purge_old_record_versions()` la borra; fila reciente propia queda | R6.2 |
 | TA.16 smoke funciones | `has_function_privilege` anon/authenticated EXECUTE de enable/disable/purge/resolve_actor = false | R3.5 |
 | cleanup | CASCADE de establishments + delete de users | — |
 
 > **TA.12 es el test que Gate 1 marcó como "falso verde" potencial.** Se hace por el camino de
-> PRODUCCIÓN: un `createClient(url, SERVICE_ROLE_KEY, { global: { headers: { 'X-Rafaq-Actor': actorId }}})`
+> PRODUCCIÓN: un `createClient(url, SERVICE_ROLE_KEY, { global: { headers: { 'X-Mitropero-Actor': actorId }}})`
 > + `.from('user_roles').insert(...)` reproduce EXACTAMENTE lo que hace la EF (service_role + header +
 > PostgREST) → assert `audit.auth_uid = actorId` vía `adminQuery`. NO se inserta por JWT directo ni por
 > `adminQuery` (eso sería el falso verde).
@@ -480,7 +493,7 @@ correcta: **envolver actor-set + DML en un ÚNICO RPC `SECURITY DEFINER`** (`per
 + el DML en el mismo cuerpo = misma transacción). Se descartó frente al header porque exige **refactorizar
 la lógica de escritura de 3 EFs** (accept/change/remove) de TS a SQL — mayor blast radius sobre features
 `done`, más superficie de Gate 2, y cambiaría la atomicidad de `change_member_role`. El **header
-`X-Rafaq-Actor` guardado por rol** logra el mismo objetivo (actor real, misma transacción, spoof-safe) con
+`X-Mitropero-Actor` guardado por rol** logra el mismo objetivo (actor real, misma transacción, spoof-safe) con
 un cambio de 1 línea por EF y sin RPCs nuevas. Elegido el header; el RPC-wrapper queda como fallback si
 Gate 1 re-run objeta el header.
 

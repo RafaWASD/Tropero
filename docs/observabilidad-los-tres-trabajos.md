@@ -29,7 +29,8 @@ La observabilidad de miTropero son **tres trabajos distintos**, con estados dist
 - **Trigger** `AFTER INSERT/UPDATE/DELETE FOR EACH ROW`, `SECURITY DEFINER` (inserta en `audit` aunque el que escribe no tenga permiso sobre ese schema).
 - **Actor real (`resolve_actor()`)** — resuelve quién hizo el cambio:
   - Write con JWT de usuario (RPC / PowerSync) → `auth.uid()`.
-  - Write por Edge Function (corre como `service_role`) → el actor viaja en el header `X-Rafaq-Actor`, que el trigger **solo confía si el rol de sesión es `service_role`** (un usuario no puede spoofearlo). El actor es el `user.id` del JWT validado del que llamó a la función, **nunca** del body. Se propaga desde `createAdminClient(actorId)` en `_shared/supabase.ts`.
+  - Write por Edge Function (corre como `service_role`) → el actor viaja en el header `X-Mitropero-Actor`, que el trigger **solo confía si el rol de sesión es `service_role`** (un usuario no puede spoofearlo). El actor es el `user.id` del JWT validado del que llamó a la función, **nunca** del body. Se propaga desde `createAdminClient(actorId)` en `_shared/supabase.ts`.
+  - *(Rebrand fase 5, 17/08 — migración `0133`.)* El header se llamaba `X-Rafaq-Actor`. El rename se hizo **en dos tiempos**: la base **acepta los dos nombres** (el nuevo y, si no vino, el viejo) mientras queden builds instaladas escribiendo el viejo — no hay OTA. El fallback vive **dentro** del gate de `service_role`, así que no abre ningún canal de spoof. Lo mismo para `X-Mitropero-Request-Id` (spec 23). La limpieza del fallback está anotada en `docs/backlog.md`.
 - **Modo de falla por tabla:**
   - **best-effort** en el camino caliente (manga): si el insert de audit falla, la carga del operario procede igual. La manga nunca se traba por el audit.
   - **estricto** para `user_roles`: los errores propagan, sin huecos en el log de membresías.

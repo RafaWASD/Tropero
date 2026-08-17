@@ -29,7 +29,7 @@ serveEf('change_member_role', async (req: Request, ctx) => {
     const userClient = createUserClient(req);
     const user = await requireUser(userClient);
     // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el OWNER que hace el
-    // cambio), NUNCA del body (el targetUserId del body es el TARGET, no el actor). El header X-Rafaq-Actor
+    // cambio), NUNCA del body (el targetUserId del body es el TARGET, no el actor). El header X-Mitropero-Actor
     // viaja en el UPDATE deactivate + el INSERT del rol nuevo + el rollback.
     const adminClient = createAdminClient(user.id, ctx.requestId);
 

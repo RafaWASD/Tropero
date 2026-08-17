@@ -35,7 +35,7 @@ import {
 } from '../utils/account-result';
 import { getPowerSync } from './powersync/database';
 import { forgetRememberedDevice } from './ble/remembered-device';
-import { newRequestId } from '../utils/request-id';
+import { newRequestId, REQUEST_ID_HEADER } from '../utils/request-id';
 
 export type { ChangeEmailResult, DeleteAccountResult, BlockingEstablishment } from '../utils/account-result';
 
@@ -124,7 +124,7 @@ export async function deleteAccount(): Promise<DeleteAccountResult> {
   try {
     const res = await supabase.functions.invoke('delete_account', {
       body: {},
-      headers: { 'X-Rafaq-Request-Id': requestId },
+      headers: { [REQUEST_ID_HEADER]: requestId },
     });
     data = res.data;
     error = res.error;

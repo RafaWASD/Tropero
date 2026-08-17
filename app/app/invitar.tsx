@@ -106,7 +106,7 @@ export default function InvitarScreen() {
       return;
     }
 
-    // Un solo requestId por acción: viaja al header X-Rafaq-Request-Id de invite_user (para el audit)
+    // Un solo requestId por acción: viaja al header X-Mitropero-Request-Id de invite_user (para el audit)
     // y al evento de dominio → correlación 1:1 entre el llamado y el evento (spec 23).
     const requestId = newRequestId();
 

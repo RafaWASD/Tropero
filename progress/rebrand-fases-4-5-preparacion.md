@@ -171,3 +171,58 @@ bundle id, en el único momento en que sale gratis. Anotarlo en `docs/backlog.md
 Una sola pregunta, no dos: **¿renombramos `rafaqsorg` → `mitropero` en el dashboard de Expo ahora**
 (sabiendo que el cupo de renames es limitado), **o lo dejamos para cuando se toque el bundle id?**
 Es interno y no lo ve nadie; la única razón para hacerlo ahora es no dejar el rebrand a medias.
+
+---
+
+## Fase 7 — los restos que NINGUNA fase del plan cubre (medido en `80c7022`)
+
+Auditando lo que queda de "rafaq" fuera de `progress/`, aparecieron **152 archivos** y varias clases que
+el plan de 6 fases **no le asignó a ninguna**. No es que estén mal hechas: nunca estuvieron agendadas.
+
+### 1. `@rafaq-test.local` — 43 ocurrencias, y la fase 2 no las podía tomar
+
+El plan puso los fixtures en la Cat. G, dentro de la fase 2, pero acotó la categoría a *"los
+helpers/fixtures de `app/e2e/`"*. La fase 2 renombró `rafaq-e2e.test` y dejó `@rafaq-test.local`, que
+vive en **20 suites backend + `scripts/seed-facundina.mjs`**, o sea fuera de `app/`.
+
+Riesgo: bajo (es un dominio de fixture), pero hay un efecto de segundo orden ya anotado por la fase 2 en
+`docs/backlog.md`: el purgado manual del remoto enumeraba **un** dominio y ahora conviven **tres**
+(`@rafaq-test.local` vivo, `@mitropero-e2e.test` nuevo, `@rafaq-e2e.test` residuo). El teardown de la
+E2E no barre por dominio (usa ids trackeados + `RUN_TAG`), así que no hay barrido roto — pero el
+purgado a mano sí quedó desactualizado.
+
+### 2. Directorio de backups — Cat. H del plan, sin fase asignada
+
+`~/.rafaq-backups/` y el prefijo `rafaq-prod-<ISO>.sql.gz` (14 + 16 ocurrencias) en
+`scripts/backup-db.mjs`, `.gitignore` y `.github/workflows/backup-prod.yml`. El plan la marca 🟡 BAJO y
+la describe, pero la lista de fases del §5 **no la incluye**. Los backups ya existentes se quedan donde
+están: no se migran, son locales.
+
+### 3. Env vars y secrets — acoplamiento externo, hay que ordenarlas
+
+- `RAFAQ_ENV` es un **secret ya seteado en Supabase**. Renombrarlo exige setear el nuevo **antes** de
+  deployar el código que lo lee, o las funciones se quedan sin ambiente. Mismo patrón de dos tiempos que
+  la fase 5.
+- `RAFAQ_CONFIRM_PROD` y `RAFAQ_KNOWN_PROD_REFS` son guardas que **Raf tipea a mano** y que además usa
+  `.github/workflows/backup-prod.yml`. Renombrarlas rompe su memoria muscular y el workflow a la vez.
+
+### 4. `rafaq-beta` — el nombre de la instancia de PowerSync
+
+7 ocurrencias. Es un recurso **externo**, en el dashboard de PowerSync. Mismo tipo de decisión que la org
+de Expo: lo ve nadie, y renombrarlo puede tocar la URL de la instancia. **Recomendación: dejarlo**, y si
+se hace, con el mismo criterio que Expo (junto a otro cambio que ya obligue a tocar la config).
+
+### 5. Assets de diseño — Cat. I, bloqueada de verdad
+
+`design/**` con 73 ocurrencias, incluidos los PNG `07-inicio-rafaq.png`, `09-rafaq-logo.png`,
+`09b-rafaq-logo-v2.png`. **Bloqueada por el logo real de miTropero**, que todavía no llegó. Renombrar los
+PNG es cosmético; el asset visual es trabajo de diseño.
+
+### Qué haría, en orden
+
+1. **`@rafaq-test.local` en las suites backend** — es lo único de esta lista que es puro texto sin
+   acoplamiento externo, y es el grupo más grande. Verificable corriendo las suites.
+2. **Directorio de backups** — chico, y hay que tocar el workflow de CI junto con el script.
+3. **Env vars** — con el mismo cuidado de dos tiempos que la fase 5, y coordinando con Raf porque las
+   tipea él.
+4. **`rafaq-beta` y los assets** — no ahora.

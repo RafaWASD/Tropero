@@ -4,9 +4,11 @@
 > Idioma de identificadores: inglés. Prosa: es-AR.
 >
 > **Naming (rebrand):** todo identificador NUEVO nace `miTropero`/`mitropero` (secret
-> `MITROPERO_STAFF_USER_IDS`, EF `audit_query`). Lo único "mitropero" tolerado es lo REUTILIZADO ya deployado:
-> el wrapper `serveEf` sigue mandando `X-Rafaq-Request-Id` (deuda de rebrand, spec 23) — NO se duplica ni
-> se renombra acá. Ver `docs/rebrand-mitropero-plan.md`.
+> `MITROPERO_STAFF_USER_IDS`, EF `audit_query`). Lo único con el nombre viejo tolerado era lo REUTILIZADO ya
+> deployado: el wrapper `serveEf` mandaba `X-Rafaq-Request-Id` (deuda de rebrand, spec 23) — NO se duplicó ni
+> se renombró acá. **[RECONCILIADO 2026-08-17]** esa deuda la pagó la **fase 5 del rebrand** (migración
+> `0133`): `serveEf` manda hoy `X-Mitropero-Request-Id` y el servidor acepta además el viejo durante la
+> transición. `audit_query` heredó el cambio sin modificarse. Ver `docs/rebrand-mitropero-plan.md`.
 >
 > Trazabilidad: cada decisión cerrada del `context.md` y cada criterio del `acceptance` quedan cubiertos por
 > ≥1 `R<n>` (mapa al final). Cada `R<n>` es verificable por ≥1 test; los DB/deploy-dependientes quedan
@@ -184,7 +186,8 @@
 - Prender el audit sobre `animals`/eventos (gate T12 de spec 18) — cuando pase, el visor los muestra sin
   cambios (ya filtra por `table_name` genérico y la allowlist de tablas se amplía en un cambio menor).
 - Export a CSV / alertas — v2 si hace falta.
-- Renombrar el header `X-Rafaq-Request-Id` — es deuda de rebrand global (fase D del plan), no de esta feature.
+- Renombrar el header `X-Rafaq-Request-Id` — era deuda de rebrand global (fase D del plan), no de esta
+  feature. **[HECHO fuera de esta spec, 2026-08-17: rebrand fase 5, migración `0133`.]**
 
 ---
 

@@ -52,7 +52,7 @@ serveEf('delete_account', async (req, ctx) => {
 
     // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el auto-borrado),
     // NUNCA del body. El write de user_roles va dentro de la RPC delete_account_tx (SECURITY DEFINER, 1
-    // request .rpc()) → el header X-Rafaq-Actor viaja en esa request → el trigger de audit lo ve en la
+    // request .rpc()) → el header X-Mitropero-Actor viaja en esa request → el trigger de audit lo ve en la
     // transacción de la RPC. delete_account_tx NO se toca. Se crea DESPUÉS de requireUser (necesita user.id).
     const adminClient = createAdminClient(user.id, ctx.requestId);
 

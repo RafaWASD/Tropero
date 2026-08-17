@@ -34,13 +34,13 @@
 ## Fase B — Edge Functions (wrapper + admin client + CORS)
 
 - [x] **T6** — `createAdminClient(actorId?, requestId?)` aditivo en `_shared/supabase.ts`: setea
-  `X-Rafaq-Request-Id` global cuando se pasa; sin él, shape idéntico al actual. Cubre: R2.12.
+  `X-Mitropero-Request-Id` global cuando se pasa; sin él, shape idéntico al actual. Cubre: R2.12.
 - [x] **T7** — Crear `_shared/serve.ts` con `serveEf(fn, handler)`: resuelve requestId (usa el header válido o
   genera server-side; header basura → server-side), expone `ctx.requestId`, emite ENTRADA/SALIDA JSON sin
   body, sin Authorization/token. **As-built:** la lógica pura de logs se extrajo a `_shared/serve-log.ts`
   (`readSubBestEffort`/`buildEfIn`/`buildEfOut`) para poder guardearla en node:test. Cubre: R2.1, R2.2, R2.3,
   R2.4, R2.5, R2.6, R2.7, R2.8, R2.9.
-- [x] **T8** — Agregar `x-rafaq-request-id` a `Access-Control-Allow-Headers` en `_shared/cors.ts`. Cubre: R2.13.
+- [x] **T8** — Agregar `x-mitropero-request-id` a `Access-Control-Allow-Headers` en `_shared/cors.ts`. Cubre: R2.13.
 - [x] **T9** — Migrar las 3 EFs que escriben `user_roles` a `serveEf` y pasar `ctx.requestId` a
   `createAdminClient(user.id, ctx.requestId)`: `change_member_role`, `accept_invitation`, `remove_member`.
   Preservar contrato observable. Cubre: R2.10, R2.11, R3.10.
@@ -52,7 +52,7 @@
 
 - [x] **T11** — Crear `app/src/utils/request-id.ts` con `newRequestId()` (`globalThis.crypto.randomUUID()`,
   polyfilleado). Cubre: R1.1, R1.2, R1.5.
-- [x] **T12** — Agregar el header `X-Rafaq-Request-Id` en los 3 call-sites de EFs (`members.ts` `invokeFn`,
+- [x] **T12** — Agregar el header `X-Mitropero-Request-Id` en los 3 call-sites de EFs (`members.ts` `invokeFn`,
   `account.ts` `deleteAccount`, `push-notifications.ts` `registerPushTokenBestEffort`), generando el
   requestId una vez por acción. **As-built:** `invokeFn` genera `?? newRequestId()` → TODAS las ops de
   miembros llevan el header (audit para las de user_roles); `invitar.tsx` threadea su requestId al header y al
@@ -125,7 +125,7 @@
 - [x] **T29** ✅[post-deploy: 306 E2E + writes user_roles OK] — Suite audit (spec 18 / user_roles): re-correr TODAS las suites que tocan el trigger
   re-creado; verde tras 0131. Cubre: R3.9, R6.4.
 - [x] **T30** ✅[uuids reales en audit.record_version; NULL en writes sin header] — Test de integración request_id: un write de `user_roles` vía EF con header
-  `X-Rafaq-Request-Id` deja ese uuid en `audit.record_version.request_id`; un write sin header deja NULL.
+  `X-Mitropero-Request-Id` deja ese uuid en `audit.record_version.request_id`; un write sin header deja NULL.
   Cubre: R3.7, R3.8, R3.10, R3.11.
 - [x] **T31** ✅[anti-spoof en vivo: writes directos admin sin header → NULL] — Test anti-spoof: un write directo con JWT de usuario (no service_role) que manda el
   header NO inyecta `request_id` (queda NULL); header con forma inválida bajo service_role → NULL. Cubre:
@@ -140,6 +140,27 @@
   EARS (las extracciones son detalle de implementación previsto por R4.3). Mapa R→archivo en los progress notes.
 - [x] **T34** — Al cerrar: pasar la feature 23 a `done` (solo el leader, tras Puerta 2) y re-subir la 17 a
   `in_progress` si corresponde.
+
+### Reconciliación posterior — rebrand fase 5 (2026-08-17)
+
+- [x] **T35 (fuera del alcance original)** — Renombrar el header de correlación `X-Rafaq-Request-Id` →
+  `X-Mitropero-Request-Id` **sin corte seco**, porque hay builds instaladas y **no hay OTA**:
+  - **Servidor tolerante**: migración `0133` re-CREA `audit.resolve_request_id()` (lee el nombre nuevo y,
+    si falta o no es uuid, el viejo — con el gate de `service_role` y el handler TOTAL intactos), y
+    `_shared/request-headers.ts` (NUEVO, puro) concentra los nombres + `readRequestIdHeader`. `serve.ts`
+    lo usa; `cors.ts` **deriva** de ahí su Allow-Headers (R2.13 pasa de literal a derivación).
+  - **Clientes**: `_shared/supabase.ts` y los tres call-sites de `app/src/services/` escriben **sólo** la
+    grafía nueva, por constante compartida (`REQUEST_ID_HEADER` en `app/src/utils/request-id.ts`).
+  - **Tests nuevos**: `request-headers.test.ts` (12 casos puros: lee cada nombre aceptado, el nuevo gana,
+    CORS ⊇ lo que se lee, ningún archivo de `supabase/functions` hardcodea el literal) ·
+    `request-id.test.ts` amplía a la punta cliente (la constante del cliente **es** la que el backend
+    acepta; ningún archivo de `app/src` hardcodea; los 3 call-sites usan la constante) ·
+    `audit/run.cjs` TA.18/TA.19/TA.20 (los dos nombres aterrizan; sin header, NULL) y TA.21 (spoof con las
+    dos grafías) — antes de esto R3.7/R3.8 no tenían test backend del header de correlación.
+  - **Limpieza del fallback**: NO se hizo. Condición escrita en `docs/backlog.md`. Los tests que exigen la
+    tolerancia están puestos para ponerse rojos si alguien limpia antes de tiempo.
+  - Detalle y baseline literal: `progress/rebrand-fase5-headers.md`. Cubre: R1.4, R2.2–R2.4, R2.12, R2.13,
+    R3.3–R3.8 (reconciliadas).
 
 ---
 

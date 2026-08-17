@@ -164,6 +164,19 @@ run(
   `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test supabase/functions/_shared/serve-log.test.ts`,
 );
 
+// rebrand fase 5 — guard del RENAME EN DOS TIEMPOS de los headers propios (`X-Rafaq-*` → `X-Mitropero-*`).
+// `supabase/functions/_shared/request-headers.ts` es la ÚNICA definición de los nombres; `cors.ts` DERIVA
+// de ahí su `Access-Control-Allow-Headers`. Este test falsifica las tres cosas que, si se caen, se caen en
+// silencio: (a) que el servidor siga leyendo el nombre VIEJO —hay builds instaladas y NO hay OTA: sin eso,
+// esos clientes entran al audit con `request_id` NULL y la correlación se pierde sin síntoma—, (b) que el
+// preflight permita TODOS los nombres que la EF lee (el skew de CORS de la spec 23, que en nativo no se
+// ve), y (c) que ningún archivo de `supabase/functions` vuelva a hardcodear el literal (escrito sobre la
+// AUSENCIA: escanea el árbol, no una lista). Puro (Request/Response/Headers), sin Deno ni keys.
+run(
+  'request-headers rename guard (rebrand fase 5)',
+  `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/ts-ext-resolver.mjs --test supabase/functions/_shared/request-headers.test.ts`,
+);
+
 // spec 24 — helpers PUROS de la EF `audit_query` (visor forense interno). `supabase/functions/audit_query/
 // query.ts` es el módulo sin deps Deno-only (solo globals JS: Date/RegExp/Set/Map) que hace el gate de
 // staff (parseStaffAllowlist, FAIL-CLOSED si el secret falta) y la validación AUTORITATIVA de filtros
@@ -253,11 +266,14 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // gating short-circuit + revoke execute ✅) → hook DESCOMENTADO (la suite corre contra la DB remota).
   run('Treatments suite (spec 02 delta tratamientos)', `node --test supabase/tests/treatments/run.cjs`);
   // spec 18 (audit-log) — capa DB: schema `audit` vendoreado (supa_audit) con record_version append-only
-  // (sin FK/CHECK) + resolve_actor total (actor real por header X-Rafaq-Actor guardado por rol service_role /
-  // auth.uid()) + trigger SECURITY DEFINER best-effort/estricto + REVOKEs fail-closed + smoke-check doble
+  // (sin FK/CHECK) + resolve_actor total (actor real por header X-Mitropero-Actor guardado por rol
+  // service_role / auth.uid(); rebrand fase 5 / 0133: se acepta además el nombre viejo X-Rafaq-Actor
+  // mientras queden builds instaladas sin OTA) + trigger SECURITY DEFINER best-effort/estricto + REVOKEs
+  // fail-closed + smoke-check doble
   // (EXECUTE + muro de lectura) + retención pg_cron mensual >90d. Tracking incremento 1: user_roles (estricto);
-  // animals GATEADA por el gate de volumen (T12/R5.4). La suite cubre TA.1–TA.16 (actor JWT/header/spoof,
-  // fail-closed, append-only, frontera WAL por sync-streams, retención, modo de falla).
+  // animals GATEADA por el gate de volumen (T12/R5.4). La suite cubre TA.1–TA.21 (actor JWT/header nuevo y
+  // viejo/spoof de las dos grafías, request_id de las dos grafías, fail-closed, append-only, frontera WAL
+  // por sync-streams, retención, modo de falla).
   // ⚠️ DESCOMENTAR cuando el LEADER aplique 0124 al remoto + redeploye las 4 EFs (accept_invitation,
   //    change_member_role, remove_member, delete_account). Antes del apply, esta suite FALLA (el schema audit
   //    no existe) → mismo patrón que spec 12/14/M6/tratamientos.

@@ -32,7 +32,7 @@
 - [x] **T4** — Helpers `audit.primary_key_columns(oid)` + `audit.to_record_id(oid, text[], jsonb)`
   (record_id estable; sin PK → NULL). Cubre: R1.6, R1.7.
 - [x] **T5** — `[Gate 1]` `audit.resolve_actor()`: lee `request.jwt.claims->>'role'`; si `service_role`,
-  toma `X-Rafaq-Actor` de `request.headers` (cast defensivo → NULL si inválido); `coalesce(header,
+  toma `X-Mitropero-Actor` de `request.headers` (cast defensivo → NULL si inválido); `coalesce(header,
   auth.uid())`. Cubre: R2.1, R2.3, R2.6, R2.8.
 - [x] **T6** — `audit.insert_update_delete_trigger()` `SECURITY DEFINER` `set search_path=''`: inserta la
   versión (`record`/`old_record` según `op`, `auth_uid = resolve_actor()`); modo de falla por `tg_argv[0]`
@@ -81,7 +81,7 @@
 ## Fase 5 — `[Gate 1 H1]` Propagación de actor en las Edge Functions (Opción A)
 
 - [x] **T15** — `_shared/supabase.ts`: `createAdminClient(actorId?: string)` — si viene `actorId`, agrega
-  `global.headers['X-Rafaq-Actor'] = actorId`. Aditivo (default = comportamiento actual). Cubre: R2.6.
+  `global.headers['X-Mitropero-Actor'] = actorId`. Aditivo (default = comportamiento actual). Cubre: R2.6.
 - [x] **T16** — `accept_invitation`, `change_member_role`, `remove_member`, `delete_account`: crear el
   admin client con el actor tras `requireUser` (`createAdminClient(user.id)`), reordenando la creación del
   admin client para que quede DESPUÉS de `requireUser`. Actor = `user.id` (JWT validado), NUNCA del body
@@ -97,7 +97,7 @@
   reconciliación R4.x (frontier de sync-streams).
 - [x] **T18** — Crear `supabase/tests/audit/run.cjs` (patrón `maneuvers/run.cjs` + helper `adminQuery` de
   `operaciones_rodeo/run.cjs`) con TA.1–TA.16 del design. Incluye explícitamente: **TA.12** (actor por el
-  camino de prod: service_role client con header `X-Rafaq-Actor` → INSERT `user_roles` → `auth_uid` =
+  camino de prod: service_role client con header `X-Mitropero-Actor` → INSERT `user_roles` → `auth_uid` =
   actor), **TA.13** (spoof-safety: `authenticated` con header forjado → `auth_uid` = su auth.uid() real),
   TA.6 (service_role sin header → NULL), TA.7/TA.8 (fail-closed anon/authenticated), TA.9 (grants +
   schema USAGE = false), TA.11 (WAL frontier), TA.15 (retención). Cubre: R7.1, R7.2, R7.4, R1.3–R1.6,
@@ -132,7 +132,7 @@
 ## Notas de gates
 
 - **Gate 1 RE-RUN (`security_analyzer` modo `spec`) OBLIGATORIO** antes de Puerta 1: la spec reconciliada
-  ahora incluye la propagación de actor (header `X-Rafaq-Actor` guardado por rol) + el diff de las 4 Edge
+  ahora incluye la propagación de actor (header `X-Mitropero-Actor` guardado por rol) + el diff de las 4 Edge
   Functions. Output: `progress/security_spec_18-audit-log.md` (actualizar). Focos del re-run: (a) el
   header solo se confía en contexto `service_role` (anti-spoof R2.8); (b) el actor sale del JWT validado,
   no del body (R2.7); (c) el muro de lectura (R3.7) + EXECUTE (R3.6) abortan la migración si se abren; (d)
@@ -141,3 +141,18 @@
 - **Gate 2 (`security_analyzer` modo `code`)** tras reviewer APPROVED: cubrirá el diff SQL **y** el diff
   de las 4 Edge Functions.
 - **Sin Gate 2.5** (ADR-029): no hay UI.
+
+## Reconciliación posterior — rebrand fase 5 (2026-08-17)
+
+- **T23 (fuera del alcance original, hecho en la fase 5 del rebrand)** — Renombrar el header de actor
+  `X-Rafaq-Actor` → `X-Mitropero-Actor`, **sin corte seco**: migración `0133` re-CREA `audit.resolve_actor()`
+  para que lea el nombre nuevo y, si no vino o no es un uuid, el viejo. Los dos invariantes de la función
+  quedan intactos y verificados: **TOTAL** (los handlers `exception when others` no se tocaron) y
+  **SPOOF-SAFE** (el fallback vive dentro del gate de `service_role`). Del lado TS, el nombre pasa a vivir
+  en `supabase/functions/_shared/request-headers.ts` (única definición) y `_shared/cors.ts` **deriva** su
+  Allow-Headers de ahí. La suite `audit` pasó de TA.1–TA.16 a **TA.1–TA.21**: TA.12/TA.13 con el nombre
+  nuevo, **TA.17** (actor con el header VIEJO → se registra igual), TA.18/TA.19 (request_id con las dos
+  grafías, spec 23), **TA.20** (control negativo sin header) y **TA.21** (spoof con las dos grafías).
+  Falsificado además con un bloque `DO` **dentro de la migración** (8 combinaciones de header) y corriendo
+  la suite ANTES del apply: TA.12/TA.18 fallaron y TA.17/TA.19 pasaron. La migración `0124` **no se editó**
+  (append-only). Detalle: `progress/rebrand-fase5-headers.md`. Cubre: R2.6, R2.8, R7.4 (reconciliadas).

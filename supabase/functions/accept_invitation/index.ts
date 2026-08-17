@@ -30,7 +30,7 @@ serveEf('accept_invitation', async (req: Request, ctx) => {
     const userClient = createUserClient(req);
     const user = await requireUser(userClient);
     // spec 18 (Opción A): admin client con el ACTOR real = user.id del JWT validado (el que ACEPTA y se
-    // auto-agrega el user_roles), NUNCA del body. El header X-Rafaq-Actor viaja en el INSERT de user_roles.
+    // auto-agrega el user_roles), NUNCA del body. El header X-Mitropero-Actor viaja en el INSERT de user_roles.
     const adminClient = createAdminClient(user.id, ctx.requestId);
 
     const body = (await req.json().catch(() => ({}))) as Body;

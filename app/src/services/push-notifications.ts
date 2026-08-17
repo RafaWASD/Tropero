@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 
 import type { Result } from '../types';
 import { supabase } from './supabase';
-import { newRequestId } from '../utils/request-id';
+import { newRequestId, REQUEST_ID_HEADER } from '../utils/request-id';
 
 export type PushRegistrationFailure =
   | { kind: 'not_a_device' }
@@ -85,7 +85,7 @@ export async function registerPushTokenBestEffort(): Promise<
         device_id: Device.osInternalBuildId ?? Device.modelId ?? null,
         platform: Platform.OS,
       },
-      headers: { 'X-Rafaq-Request-Id': requestId },
+      headers: { [REQUEST_ID_HEADER]: requestId },
     });
     if (error || data?.error) {
       const message = error?.message ?? data?.error?.message ?? 'register_push_token failed';
