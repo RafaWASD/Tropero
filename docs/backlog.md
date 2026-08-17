@@ -1784,3 +1784,36 @@ no hay forma de arreglarla remotamente.
 **Cuándo hacer las tres cosas juntas**: al pasar el bundle id a `com.mitropero.app`, que hay que hacer
 **antes de publicar en las tiendas** — un bundle id no se puede cambiar después. Ese es el único momento
 en que el rename de org, el slug y el scheme salen gratis.
+
+## [2026-08-17] 🔴 `check.mjs` deja de correr el backend en cuanto un stage anterior se pone rojo
+
+Encontrado ejecutando el rebrand. **No es teórico: está pasando ahora mismo y hace días.**
+
+`scripts/run-tests.mjs` corre los stages con `execSync` dentro de `run()`, **sin `try`**. `execSync` tira
+si el comando devuelve distinto de cero, y nadie captura → el proceso muere en el primer stage rojo.
+
+El stage `client unit tests` (línea ~67) está **rojo** desde que la spec 23 introdujo
+`'X-Rafaq-Request-Id'` en tres servicios y el guard de marca lo cazó. Los stages de backend arrancan en
+la línea ~162. Conclusión: **las 17 suites contra Supabase no se están corriendo.** Ni ahora, ni en el
+"baseline" que cualquiera midió en estos días.
+
+**Por qué es peor que un test rojo cualquiera**: el modo de falla es *silencio con forma de señal
+conocida*. Alguien mira el check, ve un único fallo que ya tiene explicación ("es el guard de marca, no
+es regresión") y concluye que el resto está sano. El resto **no corrió**. Una regresión de RLS, de
+audit o de tenant-isolation que entrara hoy sería invisible.
+
+**Y contradice al propio backlog**: la línea 1468 de este archivo afirma que el RC=0 cubre *"las ~17
+suites de backend contra Supabase"*. Es cierto sólo mientras todo lo anterior esté verde — que es
+justo cuando no importa.
+
+**Fix** (chico): que `run()` capture el fallo, lo acumule, siga con los stages siguientes, y al final
+imprima el resumen de TODOS los stages rojos y salga distinto de cero. Un stage roto deja de tapar a
+los 17 que vienen atrás.
+
+**Falsificación**: romper a propósito un test de un stage temprano y verificar que el reporte final
+igual nombre los resultados de los stages backend.
+
+**Mitigación mientras tanto**: las fases 3 y 4 del rebrand verificaron corriendo
+`node --test supabase/tests/<suite>/run.cjs` a mano. La fase 5 devuelve el árbol a verde y con eso
+`check.mjs` vuelve a alcanzar el backend solo — pero el defecto del orquestador queda igual y hay que
+cerrarlo, porque el próximo rojo temprano vuelve a apagar el backend sin avisar.
