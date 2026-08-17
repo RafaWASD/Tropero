@@ -14,8 +14,8 @@ para retomar sin releer todo. **Fuente de verdad de QUÉ hacer**: `requirements-
 | **F1** | El parser sale del registro de drivers | ✅ **commiteada `3272227`** | reviewer CHANGES_REQUESTED → fix-loop → **re-falsificado por el leader con un mutante nuevo** (`Object.values(DRIVER_REGISTRY)[0]`): compila y **4 tests caen** |
 | **F2** | `react-native-ble-plx@3.5.1` + config + permisos + veto | ✅ **commiteada `3272227`** | Veto **FIRME**: `assembleDebug` local BUILD SUCCESSFUL 3m23s, **0 EAS**. `progress/veto_ble-plx.md` |
 | **F3** | `adapter-ble-gatt` | ✅ **commiteada `a9d81ff`** | review CHANGES_REQUESTED (🟠-1: fixtures con un solo juego de parámetros) → fix-loop → **re-falsificado por el leader**: quitarle el delimitador al driver **cae**. 17 mutantes, 17 muertos |
-| **F4** | Selección/prioridad + driver del emulador | 🔄 **lista para review** (3er agente la cerró) | **Sin commitear.** `tsc` rc=0, **689 pasan / 0 fallan**, 21 mutantes / 21 muertos. Informe: `progress/impl_ios-ble-mfi-f4.md` |
-| **F5** | `adapter-mfi-ios` prearmado | ⏳ pendiente | — |
+| **F4** | Selección/prioridad + driver del emulador | ✅ **commiteada `54b72f8`** | review CHANGES_REQUESTED (2 🟠: iOS construía el manager en el arranque contra lo que el comentario afirmaba · `ble-gatt` inalcanzable en Android por falta de escritor) → fix-loop → **re-falsificado por el leader**: el mutante eager mata el test que lo nombra |
+| **F5** | `adapter-mfi-ios` prearmado | 🔄 **a medias, 3er agente caído** | **Sin commitear.** `tsc` rc=0, **173 pasan / 10 fallan** — y los 10 son **los guards de F4 haciendo su trabajo**. Ver §F5 al final |
 | **F6** | Banco ESP32 en `MODO_GATT`, en device | ⏳ pendiente | Android local; **iOS necesita OK de build de Raf** |
 | **F7** | Adapter HID | ⏳ **condicional**: solo si F0 da verde | — |
 | **F8** | Reconciliación + Gate 2 + cierre | ⏳ pendiente | ADR-024 ya enmendado (adelantado por el leader) |
@@ -135,3 +135,36 @@ vez de escanear). Los dos cerrados con guard y mutante.
 `tsc` verde **no** confirma cableado. Ante un agente muerto mid-tarea: medir el árbol (typecheck **+** correr
 las suites **+** buscar imports muertos y leer los archivos de integración) **antes** de relanzar, y relanzar
 **un agente fresco y angosto** con el diagnóstico ya servido, no resucitar el transcript largo.
+
+## F5 — estado tras el 3er agente caído (leader, 2026-08-17)
+
+Tres agentes murieron en esta unidad: **límite de sesión** (F3), **watchdog** (F4) y **conexión perdida**
+(F5). En los tres casos el árbol quedó con `tsc` en verde y trabajo a medias.
+
+**Invariantes de RBM4.3/4.6 pre-registrados por el leader ANTES de que F5 reportara — los tres SE
+MANTUVIERON**: `UISupportedExternalAccessoryProtocols` sigue `[]`, `driver-rs420.ts` tiene **0** menciones de
+`mfi`, y no hay dependencias nuevas (51 deps, 2 de Bluetooth). Verificar por comparación contra un baseline
+pre-registrado sale más barato que leer un informe y creerle.
+
+**Estado**: `adapter-mfi-ios.ts` existe (sin suite propia todavía), `ea-protocols` a medio extender.
+`tsc` rc=0 · **173 pasan / 10 fallan**.
+
+### Los 10 rojos son LOS GUARDS DE F4 HACIENDO SU TRABAJO
+
+No son regresión: son las redes que el fix-loop de F4 puso, disparándose porque F5 construyó un transporte
+sin terminar de cablearlo.
+
+- `🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALCANZABLE en su plataforma` → saltó
+  en cuanto existió `adapter-mfi-ios` sin su camino de alcance. **Es el guard que se pidió justamente para
+  que un transporte nuevo naciera en rojo si nadie puede seleccionarlo.**
+- `🟡-3: los módulos habilitados a ESCRIBIR el bastón recordado son una lista CERRADA` → F5 agregó un
+  escritor y no lo registró.
+- `RBM5.6 fail-closed: una preferencia mfi-ios no se honra hasta que F5 construya su adapter` → test de F4
+  **legítimamente obsoleto**: se reescribe citando RBM4.4/4.5.
+- `🟠-2: un transporte que la selección NO honraría no se ofrece` → ídem, revisar contra el as-built.
+- `RBM5.5/RBM4.7: la pantalla pasa la lista REAL de protocolos declarados, no un [] literal` → test **nuevo
+  de F5**, todavía no satisfecho.
+
+⚠️ **Al cerrar F5, la regla de F4 sigue valiendo**: un test viejo solo se reescribe si la spec cambió ese
+comportamiento a propósito, **citando el `RBM<n>` que lo autoriza**. Los que son guards de alcance
+(`🟠-2`, `🟡-3`) **no se aflojan**: se satisfacen cableando lo que falta.

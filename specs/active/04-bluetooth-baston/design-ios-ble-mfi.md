@@ -55,7 +55,18 @@ app/src/services/ble/
 ├── ble-gatt-protocol.ts         # PURO: decodeBase64Ascii, normalizeUuid128, bleGattDelimiterIsSupported,
 │                                #   resolveBleGattParams(driver) (espejo de spp-protocol.ts)
 ├── adapter-mfi-ios.ts           # StickAdapter kind:'mfi-ios' sobre la rama iOS de bluetooth-classic (RBM4)
+│                                #   as-built F5: MfiModuleEnv (3 operaciones con costos distintos, el
+│                                #   chequeo del nativo VA ÚLTIMO) + MfiEnv inyectable + las 10 lecciones
+│                                #   del SPP escritas desde el día uno (RBM3), porque RBM4.7 no deja que
+│                                #   el día del dato haya código nuevo. Ver §5.1.
 ├── ea-protocols.ts              # PURO: declaredEaProtocols(), mfiAvailability(driver, declared) (RBM4.2/4.4/4.5)
+│                                #   as-built F5: + resolveMfiParams / mfiDelimiterIsSupported (1 carácter:
+│                                #   la rama iOS avanza UNO) / mfiConnectOptions (SIN charset: force-cast =
+│                                #   crash) / normalizeMfiAccessories + pickMfiAccessory (no hay
+│                                #   descubrimiento: se lista y se filtra por protocolString) /
+│                                #   mfiProtocolStringsOf (hallazgo 7: el wrapper JS se come la clave) /
+│                                #   classifyMfiConnectError + MFI_CONNECT_RETRY (el motivo decide si se
+│                                #   reintenta: la cadena que el build no declara NO se martilla)
 ├── driver-esp32-gatt.ts         # ReaderDriver del EMULADOR en MODO_GATT (RBM5.12/5.13). PURO.
 └── tests (junto al módulo, patrón node:test)
     ├── ble-gatt-protocol.test.ts       # base64/latin-1 con STX, uuid case, delimitador inválido
@@ -66,7 +77,16 @@ app/src/services/ble/
     │                                   #   del driver" (RBM2.4/2.6/2.8): con un solo juego, un literal de
     │                                   #   fabricante y el valor del driver son los mismos bytes.
     ├── ea-protocols.test.ts            # lista vacía → no disponible; cadena sintética → disponible (RBM4)
+    │                                   #   as-built F5: + el GUARD derivado del paquete instalado que ata
+    │                                   #   las dos formas de `protocolStrings` (hallazgo 7): si la lib
+    │                                   #   cambia de forma, nace en rojo en vez de quedar muda.
     ├── adapter-mfi-ios.test.ts         # con lista vacía NO carga el nativo (RBM4.2)
+    │                                   #   as-built F5: máquina de estados COMPLETA con MfiEnv +
+    │                                   #   MfiModuleEnv inyectados (el doble CUENTA los toques al nativo:
+    │                                   #   0 en un arranque en frío, con control positivo). Dos perfiles
+    │                                   #   de driver (cadena y fin de trama DISTINTOS) por el mismo motivo
+    │                                   #   que la suite del BLE. Es el ÚNICO lugar donde este transporte
+    │                                   #   se ejercita: no hay banco posible sin licencia MFi.
     └── frame-parser-resolve.test.ts    # (A) exhaustivo sobre ADAPTER_KINDS + fail-closed (RBM1.4)
                                         #   (B) as-built F1 (fix del review): `readSourceFor` — EL CAMINO
                                         #       QUE CORRE EL PROVIDER, por comportamiento e IDENTIDAD.
@@ -91,7 +111,7 @@ app/src/services/ble/
 | `selection-priority.ts` | prioridad iOS; `adapterForTransport` +`ble-gatt`/+`mfi-ios`; `BindingEnv.declaredEaProtocols`; `available` de MFi. | RBM5.1–RBM5.5 |
 | `driver-registry.ts` | `DRIVER_REGISTRY = [RS420_DRIVER, ESP32_GATT_DRIVER]`. | RBM5.12 |
 | `driver-types.ts` | `TransportCapability` de kind `ble-gatt` gana `delimiter?` (el fin de trama es del **lector**, no del transporte — misma lección que 🟠-5 del SPP). | RBM2.8, RBM2.10 |
-| `logging.ts` | + `parser_unresolved` (RBM1.4), + `ble_scan_timeout`, + `mfi_unavailable{reason}`. ✅ **as-built F3**: `ble_scan_timeout` lleva `{ms, seen}` — `seen` = cuántos devices aparecieron anunciando el servicio del driver, que es lo que separa "no hay nada a la vista" de "hay algo con ese servicio que NO es un bastón" (el bridge de la balanza). `mfi_unavailable` es de F5. | RBM1.4, RBM2.5, RBM4.2 |
+| `logging.ts` | + `parser_unresolved` (RBM1.4), + `ble_scan_timeout`, + `mfi_unavailable{reason}`. ✅ **as-built F3**: `ble_scan_timeout` lleva `{ms, seen}` — `seen` = cuántos devices aparecieron anunciando el servicio del driver, que es lo que separa "no hay nada a la vista" de "hay algo con ese servicio que NO es un bastón" (el bridge de la balanza). `mfi_unavailable` es de F5. ✅ **as-built F5**: `mfi_unavailable` lleva **seis** motivos y no cuatro (se sumaron `plataforma-no-ios`, `modulo-nativo-ausente` y `delimitador-no-soportado`), y su tipo se **importa** de `ea-protocols.ts` en vez de copiarse a mano — dos unions gemelos escritos a mano fue el bug que el review de F1 cazó con `RejectReason`. | RBM1.4, RBM2.5, RBM4.2 |
 | `line-framer.ts` | **as-built F3 (no estaba en esta tabla)**: el delimitador estaba **hardcodeado** en `'\n'`, así que "framear con el delimitador del driver" (RBM2.8) exigía parametrizarlo. Entra por **constructor con default `'\n'`** → los dos call sites existentes no cambian (con test de regresión); multi-carácter consume el delimitador completo; un delimitador vacío cae al default en vez de colgar el bucle (`indexOf('')` = 0 para siempre) — quién RECHAZA ese driver es el adapter, antes de conectar. | RBM2.8 |
 | `connect-trigger.ts` | **as-built F3 (no estaba en esta tabla)**: `LINK_DWELL_MS` se **mudó** acá desde `adapter-spp-android.ts` (que lo re-exporta para no tocar sus call sites). Es una política de la **cadena de reintentos**, igual que `UNPROMPTED_RETRY_BUDGET_MS`, y con dos transportes con radio la alternativa era duplicar el número o importarlo de un adapter hermano. | RBM3.9 |
 | `adapter-ingest-mode.test.ts` | **as-built F3**: el bloque "los dos adaptadores de STREAM" pasó a tres — `ingestModeFor('ble-gatt') === 'raw-line'` va **asertado explícitamente** (el bucle exhaustivo solo exige que la fila EXISTA y sea válida, así que un `'eid'` ahí lo cazaba únicamente la suite del adapter). | RBM2.11 |
@@ -335,6 +355,73 @@ mfiAvailability(driver, declared):
 - **RS420 no declara `mfi` todavía** (RBM4.6): sin el dato del fabricante, declararlo sería inventar. Su binding en iOS sigue siendo `null` → carga manual como piso, igual que hoy.
 - **Antes de escribir el adapter** hay que leer el Swift instalado y confirmar qué expone la rama iOS a JS (RBM4.8). Si no expone lo necesario → **parar y reportar**, no escribir un adapter que no puede funcionar. Es literal lo que pasó en el SPP cuando el diseño se moldeó sobre el README.
 
+### 5.1 As-built (F5, 2026-08-17) — cómo quedó construido de verdad
+
+**Veredicto de RBM4.8: la rama iOS ALCANZA.** `getBondedDevices()` lista los accesorios prendidos con sus
+`protocolStrings`, `connectToDevice(id, options)` abre la `EASession` cruzando el plist con el accesorio, y el
+stream llega por el evento `DEVICE_READ@<serialNumber>` (`device.onDataReceived`). Con eso la pregunta abierta
+nº1 del delta queda cerrada.
+
+**Piezas y dónde vive cada decisión** (el adapter hace SOLO I/O; todo lo que es protocolo se testea sin device):
+
+```
+ea-protocols.ts (PURO)                        adapter-mfi-ios.ts (I/O)
+──────────────────────────────                ────────────────────────────────────────────
+declaredEaProtocols / …FromExpoConfig  ←─┐    MfiModuleEnv  = platformIsIos / nativeModulePresent / loadNative
+mfiAvailability(driver, declared)        │    MfiEnv        = loadNative / declaredProtocols / storage /
+resolveMfiParams(driver)                 │                    foreground / schedule / onForeground / now / timeouts
+mfiDelimiterIsSupported                  ├──  isMfiTransportAvailable(registry, declared)  ← lo consultan
+mfiConnectOptions(delimiter)             │      instantiateTransport y TRANSPORT_INSTALLABLE
+normalizeMfiAccessories / pickMfi…       │    MfiIosAdapter.resolveGate()  (el gate, PURO, un solo lugar)
+mfiProtocolStringsOf  (hallazgo 7)     ──┘    MfiIosAdapter  connect / autoConnect / disconnect / enable / disable
+classifyMfiConnectError / MFI_CONNECT_RETRY
+```
+
+**El ORDEN de los chequeos es el requisito** (RBM4.2), y es distinto del del BLE a propósito: acá el chequeo
+del módulo va **último** porque leer `NativeModules.RNBluetoothClassic` lo **instancia** (y en iOS cada método
+del nativo pasa por un `CBCentralManager` lazy que puede disparar el diálogo del SO):
+
+```
+1. ¿iOS?                                   Platform.OS      — no instancia nada
+2. ¿algún lector del registro declara mfi?  puro             — hoy NINGUNO (RBM4.6)
+3. ¿el build declara SU cadena?             Constants.expoConfig — hoy la lista está VACÍA → SE CORTA ACÁ
+4. ¿el fin de trama es frameable en iOS?    puro (1 carácter ASCII)
+5. ¿el binario está en este build?          NativeModules    — recién acá se toca el nativo
+```
+
+**Seis motivos de `mfi_unavailable`, no cuatro**: los tres del gate de datos (`driver-sin-mfi`,
+`build-sin-protocolos`, `protocolo-no-declarado`) + `delimitador-no-soportado` (hallazgo 3) +
+`plataforma-no-ios` + `modulo-nativo-ausente`. Van por separado porque desde la UI se ven idénticos (nada) y
+mandan a lugares distintos: al fabricante, a `app.config.ts`, al registro de drivers o al build.
+
+**Diferencias con el diseño de arriba, que salieron de leer el código instalado** (las siete completas están en
+la cabecera de `adapter-mfi-ios.ts`; la que importa para el diseño es la última):
+
+| # | Hallazgo | Qué cambió en la forma |
+|---|---|---|
+| 1 | En iOS **no hay descubrimiento** (`startDiscovery` → `Method not implemented`) | el adapter LISTA y filtra por `protocolString`; el emparejamiento lo hace el Accessory Picker del SO |
+| 2 | **El framing lo hace el nativo** (mensajes ya delimitados, sin terminador) | NO se usa `LineFramer` (usarlo daría cero lecturas para siempre); `splitSppPayload` solo separa defensivamente |
+| 3 | El `read()` nativo consume el delimitador con `index(after:)` (avanza **uno**) | el terminador tiene que ser de **1 carácter ASCII**; `\r\n` se **rechaza antes de conectar**. En Android sí funciona → los dos chequeos NO se unifican (test diferencial) |
+| 4 | `charset` se force-castea a `CFStringEncoding` | `mfiConnectOptions()` propio, **sin** `charset` ni `read_size`; reusar `sppConnectOptions()` **crashea la app** (guard estático) |
+| 5 | `available()`: bucle infinito + el selector del `.m` no es el que implementa el Swift | la firma **no existe** en `MfiNative` (una llamada nueva no compila) + guard estático |
+| 6 | Todo método del nativo usa un `CBCentralManager` **lazy** | el arranque en frío no toca el nativo; el oráculo CUENTA los toques (0, con control positivo) |
+| 7 | **El wrapper JS (`BluetoothDevice`) no copia `protocolStrings`** — la deja en su privado `_nativeDevice` | `mfiProtocolStringsOf` acepta las **dos** formas. Sin esto, TODO accesorio sale con `protocolStrings: []` → `pickMfiAccessory` = `null` SIEMPRE → `mfi_accessory_not_found` para siempre, o sea **RBM4.7 falso** el día que llegue la cadena, en silencio. Guard **derivado del paquete instalado** para que un `pnpm update` que cambie la forma nazca en rojo |
+
+**Las lecciones del SPP (RBM3) están escritas desde el día uno**, no "para cuando se destrabe", porque RBM4.7
+exige que ese día no haya código nuevo: presupuesto en todo await del puente (declarado en `RADIO_ADAPTERS` del
+guard de F3), latch con generación liberado en `finally` y en `disconnect()`, socket huérfano
+(`canCloseOrphanSocket`), **desconexión filtrada por nuestra dirección** (en iOS el evento es GLOBAL: lo
+alimenta el observer de `.EAAccessoryDidDisconnect`), segunda fuente de verdad del liveness (poll + foreground)
+fail-closed, foreground chequeado AL DISPARAR, tope de la cadena sin gesto **dos veces y con dos oráculos**,
+dwell del backoff y watchdog de mudez (`connected_silent`).
+
+**Lo que este diseño NO puede verificar, dicho**: no hay banco posible para MFi (hace falta un lector con
+licencia MFi **y** la cadena del fabricante), así que el transporte queda **prearmado, no verificado en
+device** — a diferencia del SPP (banco del 2026-07-30) y del BLE (banco de F6). Y hay un riesgo específico de
+esta rama que ningún unit cierra: el `sendEvent` del nativo emite por `RCTBridge` (bajo bridgeless,
+`RCTBridgeProxy`); si esa vía no estuviera cableada, las lecturas no llegarían a JS. El síntoma sería
+"conectado y mudo", que el adapter deja **escrito** en vez de dejarlo invisible.
+
 ## 6. T4 — selección, prioridad y qué transporte se monta
 
 ### 6.1 La tabla
@@ -449,6 +536,13 @@ tap     →  api.chooseTransport(kind)  →  provider: setPreferredAdapter(kind)
   id del otro — un intento que **no falla rápido, se queda esperando**. El formato viejo lo acepta solo el SPP.
 - **Guard sobre la ausencia** (`wiring.test.ts`): todo kind construido y usable en una plataforma es alcanzable
   ahí (piso, o honrado + ofrecido + con escritor), y lo no construido no se honra. F5 (`mfi-ios`) nace en rojo.
+  **(as-built F5)** nació en rojo, y el invariante ganó la distinción que le faltaba: la tercera condición
+  ("la pantalla lo ofrece") **no se puede cumplir para `mfi-ios` hoy**, porque `transportChoices` recorre el
+  REGISTRO DE LECTORES y ningún driver declara `mfi` (RBM4.6). Eso es un DATO faltante impuesto por un
+  requisito, no un mecanismo faltante — y confundir las dos cosas es cómo se afloja un guard sobre la
+  ausencia. As-built: la exención es **cerrada, nombrada** (`['ios/mfi-ios']`) y su motivo se **verifica**
+  (el registro real no tiene lectores `mfi`), y hay un **test hermano** que corre el mismo invariante con un
+  driver MFi sintético + su cadena declarada y exige que el par pase entero. Detalle en la nota de RBM5.6.
 - **Límite declarado**: el único driver `ble-gatt` del registro es el del emulador (RBM5.11), así que en
   Android esa fila dice *"Emulador ESP32 (banco de pruebas)"* — la misma superficie que RBM5.12 declaró para
   iOS, ahora también en la plataforma del productor. Es lo que hace posible T6.2 y lo que el Gate 2.5 tiene que
@@ -499,6 +593,12 @@ tap     →  api.chooseTransport(kind)  →  provider: setPreferredAdapter(kind)
 - **La rama `ble-gatt` NO lista resultados de escaneo**: ver la nota de reconciliación de RBM5.14. El copy dice lo que el adapter hace (busca y se conecta al que reconoce) y remata con el CTA real ("Buscar de nuevo").
 - **El copy por transporte en la CARD de estado** entró como un override aditivo (`env.transportKind`, opcional): `scanning` → *"Buscando el bastón…"* y `disconnected` → CTA *"Buscar de nuevo"* + hint que nombra lo accionable. **No toca `tone`, `cta`, `icon` ni `connected`**, así que el invariante de que la fila no contradiga a la card se sigue cumpliendo con el mismo test (ahora con el `transportKind` en su matriz). Sin `transportKind`, o con cualquier otro, la card es byte por byte la de antes del delta (test de regresión sobre los 6 estados).
 - **`BUILT_ADAPTERS` suma `'ble-gatt'` y NO `'mfi-ios'`** — desviación deliberada de T4.8, ver su nota.
+  **(as-built F5) esto se REVIRTIÓ y el guard se invirtió con él**: ahora suma los dos. Con el adapter escrito,
+  dejar `'mfi-ios'` afuera no es ruido, **miente el motivo** — el binding de un lector MFi diría
+  `adapter-no-construido` ("todavía no lo soportamos") en vez de `build-sin-protocolos` ("falta la autorización
+  del fabricante"), que es la distinción que RBM4.5 compró para el copy. Y por RBM4.7 tenía que entrar en este
+  diff: si hubiera que agregarlo el día que llegue la cadena, ese día habría código. Que esté "construido" no
+  lo vuelve montable: `TRANSPORT_INSTALLABLE['mfi-ios'] = isMfiTransportAvailable` incluye el gate de datos.
 
 **Gate 2.5 (ADR-029)**: hay UI nueva → capturas obligatorias. Con una salvedad honesta: la E2E de web **no puede** ejercitar el flujo BLE (no hay transporte en web y el binding en web es `serial`). Las capturas de las ramas nuevas salen de (a) los tests puros de `connection-view` para el copy y (b) **screenshots del banco en device** (RBM9.7). Decirlo es parte del entregable: una captura web de una pantalla que en web no existe sería teatro.
 

@@ -33,6 +33,7 @@ import { RS420_DRIVER } from '@/services/ble/driver-rs420';
 import { DRIVER_REGISTRY, findDriverForDevice } from '@/services/ble/driver-registry';
 import { listPairedSppDevices, isSppNativeAvailable } from '@/services/ble/adapter-spp-android';
 import { isBleGattTransportAvailable } from '@/services/ble/adapter-ble-gatt';
+import { isMfiTransportAvailable } from '@/services/ble/adapter-mfi-ios';
 import type { PairedDevice } from '@/services/ble/spp-protocol';
 import { forgetRememberedDevice, readRememberedDevice } from '@/services/ble/remembered-device';
 import { readBeepEnabled, writeBeepEnabled, cachedBeepEnabled } from '@/services/ble/feedback-pref';
@@ -64,13 +65,27 @@ import { DemoControls } from '../components/DemoControls';
 // `hasTransport` (¿hay un adapter INSTANCIADO ahora?), que en Android es false si el APK no trae el
 // módulo nativo (dev build viejo). Son dos fuentes distintas — ver `deviceRowView`.
 //
-// Delta ios-ble-mfi: entra `'ble-gatt'` — el adapter existe y la dep nativa está en el build desde F2/F3.
-// **NO entra `'mfi-ios'`**, aunque el task T4.8 lo pedía: `adapter-mfi-ios.ts` es F5 y todavía no existe,
-// así que declararlo "construido" haría que su binding saliera `available:true` y la fila ofreciera tocar
-// para conectar algo que no se puede instanciar — exactamente la afordancia muerta que el bugfix del
-// 2026-07-29 vino a cerrar. La conjunción de RBM5.5 (`built ∧ protocolo declarado`) se ejercita igual en
-// los tests, que inyectan `builtAdapters` (por eso la entrada es inyectable). Entra en F5, con el adapter.
-const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulator', 'spp-android', 'ble-gatt'];
+// Delta ios-ble-mfi: entra `'ble-gatt'` (F2/F3: el adapter existe y la dep nativa está en el build) y
+// —desde **F5**— entra `'mfi-ios'`: `adapter-mfi-ios.ts` YA EXISTE. En F4 estaba deliberadamente afuera
+// porque el adapter no existía todavía; dejarlo afuera ahora sería peor que ruido, sería MENTIR en el
+// diagnóstico: con `mfi-ios` fuera de esta lista, el binding de un lector MFi diría
+// `adapter-no-construido` ("todavía no lo soportamos") cuando la verdad es `build-sin-protocolos` ("falta
+// la autorización del fabricante") — el motivo equivocado manda a buscar el dato equivocado, y es justo
+// la distinción que RBM4.5 compró para el copy de la pantalla.
+//
+// ⚠️ Esto NO significa que el transporte se pueda montar hoy: `available` es capacidad de BUILD, y para
+// MFi RBM5.5 lo cruza con la lista de protocolos declarada (`declaredEaProtocols()`, hoy VACÍA) → el
+// binding sigue saliendo `available:false`, con el motivo honesto. La otra mitad —"¿este dispositivo puede
+// montarlo?"— la responde `TRANSPORT_INSTALLABLE` (abajo).
+const BUILT_ADAPTERS: AdapterKind[] = [
+  'web-serial',
+  'mock',
+  'manual',
+  'simulator',
+  'spp-android',
+  'ble-gatt',
+  'mfi-ios',
+];
 
 // ¿Ese transporte se puede INSTANCIAR acá y ahora? Es la otra mitad de `BUILT_ADAPTERS`: aquella dice
 // "este build trae el adapter", esto dice "este dispositivo puede montarlo". Son distintas y la diferencia
@@ -84,6 +99,11 @@ const BUILT_ADAPTERS: AdapterKind[] = ['web-serial', 'mock', 'manual', 'simulato
 const TRANSPORT_INSTALLABLE: Partial<Record<AdapterKind, () => boolean>> = {
   'spp-android': isSppNativeAvailable,
   'ble-gatt': isBleGattTransportAvailable,
+  // MFi (F5): el probe incluye el GATE DE DATOS (la lista de protocolos del build), así que hoy devuelve
+  // `false` en cualquier iPhone — y por eso la fila de un lector MFi no es accionable. La diferencia con
+  // `available` es la de siempre: `BUILT_ADAPTERS` dice "este build trae el adapter", esto dice "acá y
+  // ahora se puede montar".
+  'mfi-ios': isMfiTransportAvailable,
   // Sin módulo nativo que chequear: `new WebSerialAdapter()` nunca falla (el diálogo del navegador vive en
   // el `connect()`, no en el instanciado).
   'web-serial': () => true,

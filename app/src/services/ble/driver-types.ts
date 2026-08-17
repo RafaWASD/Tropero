@@ -29,7 +29,7 @@ export interface FrameParser {
  *   - serial   → { baud }                       (Web Serial exige un baud; el SPP virtual lo ignora)
  *   - ble-gatt → { serviceUuid, notifyCharUuid, delimiter? } (`adapter-ble-gatt`, delta ios-ble-mfi)
  *   - ble-hid  → sin params                     (teclado del SO, keyboard-wedge)
- *   - mfi      → { protocolString }             (arch-ready para iOS Classic vía Facundo, RMV6.1)
+ *   - mfi      → { protocolString, delimiter? } (`adapter-mfi-ios` vía ExternalAccessory, RMV6.1)
  *
  * `delimiter` (2026-07-30, 🟠-5 del review + BENCH-2): el fin de trama es una propiedad del LECTOR,
  * no del transporte. Estaba hardcodeado en `\n` dentro de `sppConnectOptions()`, y un lector que
@@ -44,13 +44,23 @@ export interface FrameParser {
  * el delimitador no es una preferencia sino la única forma de saber dónde termina una trama. Un
  * delimitador vacío NO abre la conexión (`resolveBleGattParams` → `delimitador-no-soportado`), en vez
  * de dejar al framer bufferando para siempre.
+ *
+ * `mfi` gana el mismo campo en **F5** (T5.2), y por el mismo motivo que el `spp`: el framing lo hace el
+ * nativo (`DelimitedStringDeviceConnectionImpl` de la rama iOS) con el terminador que se le pase en la
+ * opción `DELIMITER`, así que un lector que termine con CR y un default `\n` dejan la app **conectada,
+ * muda, sin error y sin log** — el defecto que ya se pagó en device (BENCH-2). Ausente = `\n` (el
+ * supuesto del RS420). ⚠️ En iOS el terminador tiene que ser de **UN carácter**: el `read()` nativo
+ * consume el delimitador con `index(after:)` (avanza UNO), así que un `\r\n` deja el `\n` al frente del
+ * mensaje siguiente. Lo rechaza `mfiDelimiterIsSupported` (`ea-protocols.ts`) ANTES de conectar, con su
+ * motivo, en vez de partir mal cada trama. (En Android el multi-carácter sí funciona: el nativo avanza
+ * `index + delimiter.length()`. Es una diferencia REAL entre las dos ramas de la misma librería.)
  */
 export type TransportCapability =
   | { kind: 'spp'; params: { sppUuid: string; pin?: string; delimiter?: string } }
   | { kind: 'serial'; params: { baud: number } }
   | { kind: 'ble-gatt'; params: { serviceUuid: string; notifyCharUuid: string; delimiter?: string } }
   | { kind: 'ble-hid'; params: Record<string, never> }
-  | { kind: 'mfi'; params: { protocolString: string } };
+  | { kind: 'mfi'; params: { protocolString: string; delimiter?: string } };
 
 /** Canal por el que se descubre un device (cruza con `deviceMatch` para clasificar el transporte). */
 export type DiscoveryChannel = 'classic-paired' | 'ble-advertised' | 'hid-keyboard' | 'serial-port';

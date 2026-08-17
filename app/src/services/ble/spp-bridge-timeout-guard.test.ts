@@ -75,6 +75,14 @@ const RADIO_ADAPTERS: Array<{ file: string; prefixes: string[]; minUses: number;
     minUses: 8,
     why: 'BLE GATT cross-platform: mismo latch, misma generación de intento, mismos bordes (RBM3.2/RBM3.3)',
   },
+  {
+    // Declarado en F5, que es cuando el archivo empezó a existir: el guard de abajo ("la tabla se DERIVA
+    // del árbol") lo hizo NACER EN ROJO, que es exactamente para lo que se escribió así.
+    file: 'adapter-mfi-ios.ts',
+    prefixes: ['native', 'device', 'env', 'this.env'],
+    minUses: 8,
+    why: 'MFi/ExternalAccessory en iOS: la MISMA librería de puente legacy que el SPP (el await que no contesta deja el latch tomado y el bastón muerto hasta reiniciar), y encima en iOS cada método del nativo pasa por un CBCentralManager lazy (RBM3.2/RBM3.3)',
+  },
 ];
 
 /** Prefijos de expresión que SON el puente, para un adapter dado (lo que no controlamos). */
@@ -125,7 +133,12 @@ for (const { file, prefixes, minUses, why } of RADIO_ADAPTERS) {
   test(`🔴-1 [${file}]: el adapter importa el mecanismo y lo usa DE VERDAD`, () => {
     const src = sourceOf(file);
     assert.match(src, /from '\.\/bridge-timeout'/);
-    const uses = src.match(/withTimeout(Or)?\s*\(/g)?.length ?? 0;
+    // El `(<...>)?` NO es cosmético: los tres adapters tienen al menos un `withTimeoutOr<void>(…)` (el
+    // await de `writeRemembered`, donde la inferencia necesita el parámetro explícito), y sin esa parte el
+    // contador NO lo veía — o sea que la cota estaba midiendo menos usos de los que hay. Lo delató F5, que
+    // con 8 usos reales contaba 7. Un contador que subestima puede pedir un uso de más "de relleno", que
+    // es justo lo contrario de lo que esta cota quiere decir.
+    const uses = src.match(/withTimeout(Or)?\s*(<[^>]*>)?\s*\(/g)?.length ?? 0;
     assert.ok(uses >= minUses, `${file}: se esperaban ≥${minUses} usos de withTimeout*, hay ${uses}`);
   });
 

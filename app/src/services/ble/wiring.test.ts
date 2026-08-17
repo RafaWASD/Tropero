@@ -16,8 +16,10 @@ import {
   ADAPTER_KINDS,
   type AdapterKind,
 } from './adapter-selection.ts';
-import { isAdapterUsableOn } from './selection-priority.ts';
+import { isAdapterUsableOn, selectReaderBinding } from './selection-priority.ts';
 import { DRIVER_REGISTRY } from './driver-registry.ts';
+import { parseRs420Line } from './parser-rs420.ts';
+import type { ReaderDriver } from './driver-types.ts';
 import { permissionModelFor, permissionDenialBlocksApp } from './permissions.ts';
 import { isConnectedStatus, blocksManualEntry } from './connection-status.ts';
 import { logTransportEvent } from './logging.ts';
@@ -37,6 +39,22 @@ const SCREEN = '../../features/ble-stick/screens/StickConnectionScreen.tsx';
 function src(rel: string): string {
   return stripSourceComments(readFileSync(resolve(HERE, rel), 'utf8'));
 }
+
+/**
+ * La cadena de protocolo iAP SINTÉTICA y el driver que la declara. **No es la de ningún fabricante real**
+ * (RBM4.6: inventarla es exactamente lo que el requisito prohíbe, y no habilitaría ningún accesorio).
+ * Existe para poder EJECUTAR el diff del día que el trámite MFi entregue el dato: una línea en
+ * `app.config.ts` + una `TransportCapability {kind:'mfi'}` en el driver del fabricante. Cero código.
+ */
+const SYNTHETIC_MFI_PROTOCOL = 'com.ejemplo.lector-sintetico';
+const SYNTHETIC_MFI_DRIVER: ReaderDriver = {
+  vendorId: 'mfi-sintetico',
+  displayName: 'Lector MFi sintético (test)',
+  transports: [{ kind: 'mfi', params: { protocolString: SYNTHETIC_MFI_PROTOCOL } }],
+  frameParser: { parse: parseRs420Line },
+  deviceMatch: { namePattern: /sintetico/i },
+  streaming: true,
+};
 
 // ─── R10.3 / R11.2: selección de adaptador por plataforma/entorno ───────────────────────
 
@@ -355,11 +373,13 @@ test('MEDIUM-2 (delta ios-ble-mfi): la pantalla NO persiste NADA — ni el vendo
     false,
     'la pantalla volvió a persistir el bastón recordado: el único que sabe con qué id (y con qué adapterKind) se abrió el link es el ADAPTER',
   );
-  // Y los dos escritores legítimos siguen pasando su `adapterKind`: sin ese literal la preferencia de
+  // Y los TRES escritores legítimos siguen pasando su `adapterKind`: sin ese literal la preferencia de
   // RBM5.6 nunca se escribe y toda la rama de `selectTransportAdapter` queda inalcanzable en producción.
+  // (`mfi-ios` entra en F5, con su adapter: es el tercer transporte con radio.)
   for (const [rel, kind] of [
     ['./adapter-spp-android.ts', 'spp-android'],
     ['./adapter-ble-gatt.ts', 'ble-gatt'],
+    ['./adapter-mfi-ios.ts', 'mfi-ios'],
   ] as const) {
     const adapterSrc = stripSourceComments(readFileSync(resolve(HERE, rel), 'utf8'));
     assert.match(
@@ -421,28 +441,48 @@ test('RBM5.5/RBM4.7: la pantalla pasa la lista REAL de protocolos declarados, no
     /declaredEaProtocols:\s*declaredEaProtocols\(\)/,
     'la pantalla no pasa `declaredEaProtocols()`: el gate de MFi quedaría clavado en "build-sin-protocolos"',
   );
-  // Y el `BUILT_ADAPTERS` de la pantalla: `'ble-gatt'` SÍ (el adapter existe desde F3 y la dep nativa está
-  // en el build), `'mfi-ios'` NO. El task T4.8 pedía los dos; declarar construido un adapter que todavía no
-  // existe (`adapter-mfi-ios.ts` es F5) haría que su binding saliera `available:true` sobre un transporte
-  // que `instantiateTransport` no puede montar — la afordancia muerta que el bugfix del 2026-07-29 cerró.
-  // ⚠️ Cuando F5 escriba el adapter, tiene que agregarlo a `BUILT_ADAPTERS` **y actualizar este guard en el
-  // mismo diff**: por eso está escrito sobre la AUSENCIA y no como un comentario.
+  // Y el `BUILT_ADAPTERS` de la pantalla. **F5 lo cambió a propósito y esta es su autorización escrita**:
+  // en F4 este guard exigía que `'mfi-ios'` NO estuviera, porque `adapter-mfi-ios.ts` no existía y
+  // declararlo construido habría hecho que su binding saliera `available:true` sobre un transporte que
+  // `instantiateTransport` no podía montar (la afordancia muerta del bugfix del 2026-07-29). En F5 el
+  // adapter EXISTE, así que la exigencia se invierte y por DOS requisitos, no por gusto:
+  //   · **RBM4.5** — con `mfi-ios` afuera de esta lista, el binding de un lector MFi diría
+  //     `adapter-no-construido` ("todavía no lo soportamos") cuando la verdad es `build-sin-protocolos`
+  //     ("falta la autorización del fabricante"). El motivo equivocado manda a buscar el dato equivocado,
+  //     y esa distinción es literalmente lo que RBM4.5 compró para el copy de la pantalla.
+  //   · **RBM4.7** — "el día que llegue la cadena el diff es el DATO, cero código". Si el kind tuviera que
+  //     entrar a esta lista ese día, sería código.
+  // ⚠️ Y NO significa que hoy se pueda montar: `available` es capacidad de BUILD y para MFi RBM5.5 lo cruza
+  // con la lista de protocolos declarada (hoy VACÍA) → el binding sigue `available:false` con su motivo
+  // honesto. La otra mitad ("¿este dispositivo puede montarlo?") la responde `TRANSPORT_INSTALLABLE`, que
+  // para `mfi-ios` es `isMfiTransportAvailable` e incluye el gate de datos → hoy false en cualquier iPhone.
   const built = /const BUILT_ADAPTERS[^=]*=\s*\[([^\]]*)\]/.exec(src)?.[1] ?? '';
   assert.ok(built.length > 0, 'no se encontró BUILT_ADAPTERS (¿se renombró?)');
   assert.match(built, /'ble-gatt'/, 'falta ble-gatt en BUILT_ADAPTERS: su binding diría "no disponible"');
-  assert.equal(
-    /'mfi-ios'/.test(built),
-    false,
-    'mfi-ios declarado construido sin `adapter-mfi-ios.ts` (F5): el binding saldría available:true sobre un transporte que no se puede instanciar',
+  assert.match(
+    built,
+    /'mfi-ios'/,
+    'falta mfi-ios en BUILT_ADAPTERS: con el adapter escrito (F5), su binding mentiría el motivo (diría "no construido" en vez de "falta el protocolo del fabricante", RBM4.5)',
   );
   // Y el conjunto COMPLETO, no solo los dos que importan hoy: `selection-priority.test.ts` usa un espejo
   // de esta lista (`BUILT_TODAY`) para los casos "como en el build real", y un espejo que puede driftar no
   // prueba nada. Un kind que entre o salga de la pantalla tiene que pasar por acá.
   const declarados = [...built.matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
-  assert.deepEqual(declarados, ['ble-gatt', 'manual', 'mock', 'simulator', 'spp-android', 'web-serial']);
+  assert.deepEqual(declarados, [
+    'ble-gatt',
+    'manual',
+    'mfi-ios',
+    'mock',
+    'simulator',
+    'spp-android',
+    'web-serial',
+  ]);
   for (const kind of declarados) {
     assert.ok((ADAPTER_KINDS as readonly string[]).includes(kind), `'${kind}' no es un AdapterKind`);
   }
+  // `hid-wedge` sigue AFUERA, y eso NO cambió con F5: su gate es el físico (R8.7/RBM8.0) y su archivo es
+  // un placeholder de 22 líneas. Se asierra explícito para que el diff que lo agregue sea deliberado.
+  assert.equal(declarados.includes('hid-wedge'), false, 'hid-wedge sigue gateado por el gate físico (RBM8.0)');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -525,9 +565,12 @@ test('🟡-3: los módulos habilitados a ESCRIBIR el bastón recordado son una l
     [
       // El BORDE (define la función y toca el storage). No escribe: expone.
       'app/src/services/ble/remembered-device.ts',
-      // Los dos transportes con radio: son los ÚNICOS que saben con qué id y por qué transporte se abrió
-      // el link de verdad, y escriben en el punto donde el bastón contestó.
+      // Los TRES transportes con radio: son los ÚNICOS que saben con qué id y por qué transporte se abrió
+      // el link de verdad, y escriben en el punto donde el bastón contestó. `adapter-mfi-ios.ts` entra en
+      // F5 con su adapter (y este guard fue el que lo hizo NACER EN ROJO: la lista es cerrada a propósito,
+      // así que sumar un escritor es una decisión visible en el diff y no un olvido).
       'app/src/services/ble/adapter-ble-gatt.ts',
+      'app/src/services/ble/adapter-mfi-ios.ts',
       'app/src/services/ble/adapter-spp-android.ts',
     ].sort(),
     'apareció (o desapareció) un escritor de la preferencia del bastón recordado: tiene que ser el ADAPTER que conectó, no una pantalla',
@@ -539,6 +582,11 @@ test('🟡-3: los módulos habilitados a ESCRIBIR el bastón recordado son una l
   // a ser código inalcanzable).
   assert.deepEqual(byKind.get('ble-gatt'), ['app/src/services/ble/adapter-ble-gatt.ts']);
   assert.deepEqual(byKind.get('spp-android'), ['app/src/services/ble/adapter-spp-android.ts']);
+  assert.deepEqual(byKind.get('mfi-ios'), ['app/src/services/ble/adapter-mfi-ios.ts']);
+  // ANTI-VACUIDAD del mapa: un `byKind` vacío (regex que dejó de matchear la forma de la llamada) haría
+  // pasar las tres aserciones de arriba si alguien las escribiera con `?? []`. Acá se exige que el barrido
+  // haya visto EXACTAMENTE los tres kinds y ninguno más.
+  assert.deepEqual([...byKind.keys()].sort(), ['ble-gatt', 'mfi-ios', 'spp-android']);
 });
 
 test('🟠-2: cada adapter usa el bastón recordado SOLO si el registro es de SU transporte', () => {
@@ -554,6 +602,11 @@ test('🟠-2: cada adapter usa el bastón recordado SOLO si el registro es de SU
   for (const [rel, kind, legacy, porQue] of [
     ['./adapter-ble-gatt.ts', 'ble-gatt', 'false', 'un registro viejo (sin adapterKind) solo pudo escribirlo el SPP'],
     ['./adapter-spp-android.ts', 'spp-android', 'true', 'negarle el formato viejo le borra el bastón a todo teléfono instalado (RBM5.7)'],
+    // MFi (F5): el mundo malo propio de este transporte es abrir una `EASession` contra una MAC de
+    // Bluetooth Classic guardada por el SPP. `acceptsLegacy: false` por el mismo motivo que el BLE, y con
+    // una razón extra: en iOS el id NO es una MAC sino el `serialNumber` del accesorio, así que un registro
+    // del formato viejo (que solo pudo escribirlo el SPP, en Android) no puede ser de un accesorio MFi.
+    ['./adapter-mfi-ios.ts', 'mfi-ios', 'false', 'en iOS el id es el serialNumber del accesorio, no una MAC de Classic'],
   ] as const) {
     const s = src(rel);
     assert.match(s, /rememberedDeviceIdFor\(/, `${rel} lee el registro sin filtrar por transporte`);
@@ -570,21 +623,47 @@ test('🟠-2: cada adapter usa el bastón recordado SOLO si el registro es de SU
   }
 });
 
-test('🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALCANZABLE en su plataforma', () => {
-  // El invariante, en una frase: un `AdapterKind` que este build construye y que existe en esta plataforma
-  // tiene que poder montarse **de alguna forma** — o es el piso por plataforma, o el operario lo puede
-  // ELEGIR en la pantalla y esa elección SOBREVIVE al reinicio (alguien escribe la preferencia). Si no, es
-  // código que nadie puede alcanzar, con toda la suite en verde: exactamente `ble-gatt` en Android antes de
-  // este fix, y R6.6 antes de que se cableara.
-  //
-  // La otra mitad es fail-closed: lo que este build NO construye NO se puede honrar como preferencia (si
-  // no, un valor de storage le saca el piso al operario y lo deja sin transporte, en silencio).
+/** Los `AdapterKind` que la pantalla declara construidos, leídos de su fuente (es un `.tsx`). */
+function builtAdaptersOfScreen(): AdapterKind[] {
   const built = [...(/const BUILT_ADAPTERS[^=]*=\s*\[([^\]]*)\]/.exec(src(SCREEN))?.[1] ?? '').matchAll(/'([^']+)'/g)]
     .map((m) => m[1] as AdapterKind);
   assert.ok(built.length > 0, 'no se pudo leer BUILT_ADAPTERS de la pantalla (¿se renombró?)');
-  const { byKind } = preferenceWriters();
+  return built;
+}
 
+/**
+ * ¿Hay en el registro algún LECTOR que resuelva a ese `AdapterKind` en esa plataforma?
+ *
+ * Es la precondición de "ofrecible", y hace falta nombrarla porque `transportChoices` recorre EL REGISTRO:
+ * un transporte que ningún lector declara no puede tener fila. Eso **no** es un cableado faltante, es un
+ * DATO faltante — y en el caso de `mfi` el dato faltante lo impone un requisito (RBM4.6: no se inventa la
+ * `protocolString` de ningún fabricante). Distinguir las dos cosas es lo que evita las dos degeneraciones:
+ * aflojar el guard "porque no se puede cumplir", o "cumplirlo" inventando un driver.
+ */
+function hasReaderFor(
+  kind: AdapterKind,
+  platformOS: string,
+  registry: ReaderDriver[],
+  declaredEaProtocols: readonly string[],
+  builtAdapters: AdapterKind[],
+): boolean {
+  return registry.some(
+    (driver) =>
+      selectReaderBinding({ platformOS, driver, builtAdapters, declaredEaProtocols })?.adapterKind === kind,
+  );
+}
+
+/**
+ * Corre el invariante de alcanzabilidad sobre TODAS las plataformas y devuelve los pares
+ * `plataforma/kind` que quedaron EXENTOS por no tener ningún lector en el registro. Lo que sí es
+ * alcanzable se asierra acá adentro (honrado + ofrecido + con escritor).
+ */
+function checkReachability(registry: ReaderDriver[], declaredEaProtocols: readonly string[]) {
+  const built = builtAdaptersOfScreen();
+  const { byKind } = preferenceWriters();
+  const sinLector: string[] = [];
   let paresNoPiso = 0;
+
   for (const platformOS of ['web', 'ios', 'android', 'macos']) {
     const piso = selectTransportAdapter({ platformOS, mode: 'auto' });
     // Lo que la PANTALLA ofrece elegir en esa plataforma (con el piso montado, que es el arranque normal).
@@ -598,9 +677,9 @@ test('🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALC
         mode: 'auto',
         mountedKind: piso,
         builtAdapters: built,
-        declaredEaProtocols: [],
+        declaredEaProtocols,
         canInstantiate: () => true,
-        registry: DRIVER_REGISTRY,
+        registry,
       }).map((c) => c.adapterKind),
     );
     for (const kind of ADAPTER_KINDS) {
@@ -615,6 +694,10 @@ test('🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALC
       }
       if (!isAdapterUsableOn(kind, platformOS)) continue; // no existe en esta plataforma: nada que exigir
       if (kind === piso) continue; // alcanzable sin preferencia (es el piso)
+      if (!hasReaderFor(kind, platformOS, registry, declaredEaProtocols, built)) {
+        sinLector.push(`${platformOS}/${kind}`);
+        continue;
+      }
       paresNoPiso += 1;
       assert.equal(
         honrado,
@@ -631,10 +714,57 @@ test('🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALC
       );
     }
   }
+  return { sinLector: sinLector.sort(), paresNoPiso };
+}
+
+test('🟠-2 GUARD SOBRE LA AUSENCIA: todo transporte construido y usable es ALCANZABLE en su plataforma', () => {
+  // El invariante, en una frase: un `AdapterKind` que este build construye, que existe en esta plataforma
+  // y que **algún lector del registro declara** tiene que poder montarse — o es el piso por plataforma, o
+  // el operario lo puede ELEGIR en la pantalla y esa elección SOBREVIVE al reinicio (alguien escribe la
+  // preferencia). Si no, es código que nadie puede alcanzar, con toda la suite en verde: exactamente
+  // `ble-gatt` en Android antes de este fix, y R6.6 antes de que se cableara.
+  //
+  // La otra mitad es fail-closed: lo que este build NO construye NO se puede honrar como preferencia (si
+  // no, un valor de storage le saca el piso al operario y lo deja sin transporte, en silencio).
+  const { sinLector, paresNoPiso } = checkReachability(DRIVER_REGISTRY, []);
+
+  // ── LA EXENCIÓN ES CERRADA Y SE NOMBRA (si no, "no tiene lector" sería una puerta para aflojar el guard) ──
+  // Hoy hay exactamente UN par exento y su motivo lo impone un requisito: `mfi-ios` en iOS no tiene lector
+  // porque **RBM4.6 prohíbe inventar una `protocolString`**, y sin una `TransportCapability {kind:'mfi'}` en
+  // algún driver, `transportChoices` (que recorre el registro) no puede tener fila. Sumar un par a esta
+  // lista es una decisión visible en el diff.
+  assert.deepEqual(
+    sinLector,
+    ['ios/mfi-ios'],
+    'cambió el conjunto de transportes construidos SIN NINGÚN LECTOR en el registro: si es uno nuevo, o le falta el driver o le falta el cableado — no lo agregues acá sin el motivo',
+  );
+  // Y el motivo se verifica, no se declara: el registro REAL no tiene ni un lector que hable `mfi`.
+  assert.equal(
+    DRIVER_REGISTRY.some((d) => d.transports.some((t) => t.kind === 'mfi')),
+    false,
+    'apareció un driver con transporte mfi: ¿es la cadena REAL del fabricante? (RBM4.6) — entonces este test tiene que pasar al caso alcanzable',
+  );
   // ANTI-VACUIDAD: si ningún kind cayera en la rama "no es el piso", el invariante no probaría nada. Hoy el
-  // par es exactamente `ble-gatt` en Android — el que 🟠-2 vino a destrabar. Y F5 va a sumar `mfi-ios` en
-  // iOS: nace en rojo hasta que tenga las tres cosas (honrado, ofrecido, escrito).
+  // par es exactamente `ble-gatt` en Android — el que 🟠-2 vino a destrabar.
   assert.ok(paresNoPiso > 0, 'ANTI-VACUIDAD: ningún transporte alcanzable-solo-por-preferencia (el guard no midió nada)');
+});
+
+test('🟠-2/RBM4.7: con la cadena del fabricante, `mfi-ios` queda ALCANZABLE sin escribir una línea de código', () => {
+  // ── ESTE ES EL TEST QUE REEMPLAZA LA EXENCIÓN POR UNA PRUEBA ────────────────────────────────────────
+  // El guard de arriba exime a `ios/mfi-ios` porque hoy ningún lector declara `mfi` (RBM4.6). Una exención
+  // sin contraparte sería justo la forma de aflojar un guard sobre la ausencia: "no se puede cumplir" es
+  // indistinguible de "no lo cableé". Así que acá se corre el MISMO invariante inyectando SOLO LOS DOS
+  // DATOS del día que llegue la cadena —una `TransportCapability {kind:'mfi'}` en un driver y la cadena en
+  // la lista declarada del build— y se exige que el par pase entero: honrado por la preferencia, ofrecido
+  // por la pantalla y con un escritor que lo persista. Eso es literalmente RBM4.7 ("cero código ese día")
+  // medido sobre el cableado, y es lo que hace que la exención de arriba sea honesta.
+  const registry = [...DRIVER_REGISTRY, SYNTHETIC_MFI_DRIVER];
+  const { sinLector, paresNoPiso } = checkReachability(registry, [SYNTHETIC_MFI_PROTOCOL]);
+  assert.deepEqual(sinLector, [], 'con un lector MFi en el registro no queda ningún transporte sin lector');
+  assert.ok(paresNoPiso >= 2, `se esperaban ≥2 pares no-piso (android/ble-gatt + ios/mfi-ios), hubo ${paresNoPiso}`);
+  // Y la contraprueba de que el fixture ejercita el par nuevo y no solo el viejo: sin el driver sintético el
+  // par sale exento, con él NO. (Si `checkReachability` dejara de mirar `mfi-ios`, las dos mitades pasarían.)
+  assert.deepEqual(checkReachability(DRIVER_REGISTRY, [SYNTHETIC_MFI_PROTOCOL]).sinLector, ['ios/mfi-ios']);
 });
 
 test('🟠-2: la pantalla OFRECE los otros transportes, y NO desde adentro de la rama de uno de ellos', () => {
@@ -692,10 +822,15 @@ test('🟠-2: el probe de "se puede instanciar" de la pantalla NO puede driftar 
       `la pantalla usa ${fn}() para '${kind}' y \`instantiateTransport\` no: la fila y el montaje pueden discrepar`,
     );
   }
-  // Y los dos transportes con radio tienen que estar declarados con su probe (los que pueden faltar en un
+  // Y los TRES transportes con radio tienen que estar declarados con su probe (los que pueden faltar en un
   // build: sin módulo nativo, el adapter está compilado y no se puede montar).
   assert.match(mapa, /'spp-android':\s*isSppNativeAvailable/);
   assert.match(mapa, /'ble-gatt':\s*isBleGattTransportAvailable/);
+  // `mfi-ios` (F5): su probe incluye además el GATE DE DATOS (la lista de protocolos del build), así que
+  // hoy devuelve false en cualquier iPhone → la fila de un lector MFi no es accionable. Sin esta entrada, la
+  // pantalla lo daría por instalable y tocarlo dejaría al operario sin transporte (`instantiateTransport`
+  // devuelve null): la afordancia muerta del bugfix del 2026-07-29.
+  assert.match(mapa, /'mfi-ios':\s*isMfiTransportAvailable/);
 });
 
 test('🟠-2: el LECTOR que la fila promete es el que el adapter va a usar de verdad', () => {

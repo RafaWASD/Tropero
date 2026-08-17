@@ -48,6 +48,7 @@ import { WebSerialAdapter } from './adapter-web-serial';
 import { SimulatorAdapter } from './adapter-simulator';
 import { SppAndroidAdapter, isSppNativeAvailable } from './adapter-spp-android';
 import { BleGattAdapter, isBleGattTransportAvailable } from './adapter-ble-gatt';
+import { MfiIosAdapter, isMfiTransportAvailable } from './adapter-mfi-ios';
 import { isDemoMode } from './demo-gate';
 import { readRememberedDevice } from './remembered-device';
 import { classifyReadOutcome, playFeedback, primeFeedback } from './feedback';
@@ -181,12 +182,19 @@ function instantiateTransport(kind: ReturnType<typeof selectTransportAdapter>): 
       // no tocó nada (RBM3.8). La construcción vive detrás de los gates de `autoConnect`/`doConnect`.
       return isBleGattTransportAvailable() ? new BleGattAdapter() : null;
     case 'mfi-ios':
-      // Delta ios-ble-mfi: el KIND existe desde F4 (lo exige el mapeo de RBM5.2 y el `available` de
-      // RBM5.5), el ADAPTER llega en F5. Hasta entonces no se monta nada → la app queda manual-first en
-      // ese binding, que es la verdad: sin la cadena de protocolo del fabricante no hay sesión que abrir
-      // (RBM4.2/RBM5.10). Devolver null acá y no lanzar es deliberado: un throw en el instanciado se
-      // llevaría el render del provider por un dato de configuración.
-      return null;
+      // MFi / ExternalAccessory en iOS (delta ios-ble-mfi F5, RBM4.1/RBM4.2). El guard es el GATE DE
+      // DATOS y su orden es el requisito: `isMfiTransportAvailable()` chequea iOS → un driver del
+      // registro que declare `mfi` → que ESTE build declare su `protocolString` en
+      // `UISupportedExternalAccessoryProtocols` → y solo entonces el módulo nativo. Hoy corta en el
+      // tercero (la lista está VACÍA: falta la cadena del fabricante, RBM4.6) → no se monta nada y la app
+      // queda manual-first, que es la verdad: sin protocolo declarado no hay sesión que abrir.
+      //
+      // ⚠️ Con la lista vacía este camino **no lee `NativeModules`** (RBM4.2), y eso no es paranoia: leer
+      // ese global INSTANCIA el módulo nativo en bridgeless y el `init()` de la lib hace un force-cast
+      // sobre esa misma clave del plist. Es la misma clase que el 🟠-1 del review de F4 en el BLE
+      // (construir el cliente en el arranque toca la radio) — acá el arranque en frío del provider ni
+      // siquiera pregunta.
+      return isMfiTransportAvailable() ? new MfiIosAdapter() : null;
     case 'manual':
       // Piso manual sin transporte extra (iOS, y el flag de E2E que reproduce ese sub-estado).
       return null;
@@ -462,11 +470,12 @@ export function BleStickListenerProvider({
       // diálogo de activar. Cualquier gate que no pase deja el estado en 'off' (nunca se intentó) y
       // loguea el motivo — ver `SppAndroidAdapter.autoConnect()`.
       //
-      // `autoConnect` es OPCIONAL en `StickAdapter`: la implementan los DOS transportes con radio —
-      // `spp-android` y, desde el delta ios-ble-mfi, `ble-gatt` (RBM2.16). No es olvido que los otros
-      // cuatro no la tengan: web-serial NO PUEDE (la Web Serial API exige un gesto para `requestPort()`),
-      // manual no tiene transporte, y mock/simulator los conecta su propio disparador (bridge de E2E /
-      // botón de demo). O sea: cero riesgo para las ~70 specs E2E, que corren en mock.
+      // `autoConnect` es OPCIONAL en `StickAdapter`: la implementan los TRES transportes de bastón físico
+      // — `spp-android`, y desde el delta ios-ble-mfi `ble-gatt` (RBM2.16, F3) y `mfi-ios` (F5). No es
+      // olvido que los otros tres no la tengan: web-serial NO PUEDE (la Web Serial API exige un gesto para
+      // `requestPort()`), manual no tiene transporte, y mock/simulator los conecta su propio disparador
+      // (bridge de E2E / botón de demo). O sea: cero riesgo para las ~70 specs E2E, que corren en mock.
+      // (`hid-wedge` sigue GATED y no se monta.)
       //
       // ⚠️ Consecuencia NUEVA de este delta, dicha en voz alta: con `ble-gatt` como piso de iOS (RBM5.6)
       // y como preferencia posible en Android, este `autoConnect` hace que la app arranque ESCANEANDO por

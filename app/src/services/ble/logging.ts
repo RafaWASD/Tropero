@@ -12,6 +12,7 @@
 
 import { addBleBreadcrumb } from '../observability/sentry';
 import type { RejectReason } from './contract';
+import type { MfiUnresolvedReason } from './ea-protocols';
 
 export type TransportLogEvent =
   | { kind: 'connection_changed'; connected: boolean }
@@ -108,7 +109,24 @@ export type TransportLogEvent =
    *     UART (ADR-003): la conducta correcta es no conectarse, y este contador es lo que hace visible
    *     que pasó eso y no lo otro.
    */
-  | { kind: 'ble_scan_timeout'; ms: number; seen: number };
+  | { kind: 'ble_scan_timeout'; ms: number; seen: number }
+  /**
+   * El transporte MFi (`adapter-mfi-ios`, RBM4.2) NO está resuelto, y por qué. Es el ÚNICO rastro que
+   * deja el camino gateado: con la lista `UISupportedExternalAccessoryProtocols` vacía —el estado de hoy—
+   * el adapter corta ANTES de tocar el módulo nativo, así que desde afuera se ve exactamente igual que
+   * "el operario no está bastoneando" (nada). Los seis motivos mandan a lugares distintos:
+   *   · `build-sin-protocolos`   → falta el dato del FABRICANTE (trámite MFi). El estado normal hoy.
+   *   · `protocolo-no-declarado` → el driver declara una cadena que este build no tiene en el plist:
+   *     falta la línea en `app.config.ts` (error de configuración NUESTRO, no del fabricante).
+   *   · `driver-sin-mfi`         → ningún lector del registro habla MFi. Normal hasta que llegue el dato.
+   *   · `delimitador-no-soportado` → el driver declara un fin de trama que la rama iOS no puede framear
+   *     (vacío o multi-carácter): se corta ANTES de conectar en vez de partir mal cada trama.
+   *   · `plataforma-no-ios`      → ExternalAccessory no existe fuera de iOS.
+   *   · `modulo-nativo-ausente`  → el binario de la lib no está en este build (o es web/CI).
+   * El tipo del motivo se **importa** de `ea-protocols.ts` (`import type`, se borra en runtime): la copia
+   * a mano de un union es el bug que el review de F1 cazó con `RejectReason`.
+   */
+  | { kind: 'mfi_unavailable'; reason: MfiUnresolvedReason };
 
 /**
  * Registra un evento de transporte sin bloquear (R15.1). Best-effort: si el logger falla, se

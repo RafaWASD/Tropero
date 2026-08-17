@@ -313,11 +313,46 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 > Leer ese global **instancia** el módulo nativo en bridgeless (`BridgelessNativeModuleProxy` → `RCTTurboModuleManager` → `[moduleClass new]`), como ya dejó documentado el guard de purpose strings. Con la clave declarada eso hoy no crashea — el requisito es igual: sin protocolo declarado, no hay nada que abrir.
 
+> **Reconciliación al as-built (F5, 2026-08-17)** — el requisito se cumple literal, con dos cosas que no
+> decía y que la implementación tuvo que fijar:
+>
+> 1. **El costo de "consultar" NO es el mismo que en el BLE, y por eso el orden es distinto.** En
+>    `adapter-ble-gatt` el chequeo del módulo (`NativeModules.BlePlx`) es barato y va primero; acá
+>    `nativeModulePresent()` va **último**, después del gate de datos, porque leer
+>    `NativeModules.RNBluetoothClassic` **instancia** el módulo y su `init()` construye
+>    `EAAccessoryManager.shared()` y hace el force-cast sobre la clave del plist. Encima, en iOS **cada**
+>    método del nativo pasa por `checkBluetoothAdapter()`, que usa un `CBCentralManager` **lazy**, y la propia
+>    lib documenta que eso *"prompt bluetooth permission on first call of any bluetooth-related method"*: o
+>    sea que tocar el nativo en el arranque le puede mostrar el diálogo de Bluetooth del SO a un operario que
+>    no tocó nada — el 🟠-1 del review de F4, en este transporte. El orden as-built es: iOS → un driver
+>    declara `mfi` → el build declara SU cadena → el fin de trama es frameable → **y solo entonces** el módulo.
+> 2. **El oráculo es un contador, no un comentario.** El borde del módulo entra inyectado (`MfiModuleEnv`) y
+>    el test cuenta los toques durante un arranque en frío COMPLETO (guard de disponibilidad + construcción
+>    del adapter + `autoConnect` + `connect`): tiene que dar **cero**, con control positivo (con la cadena
+>    declarada, >0). Los dos mutantes que reintroducen el toque eager —en el guard y en el `doConnect`—
+>    **mueren**. Lo que ningún unit puede cerrar queda declarado: que el diálogo del SO no aparezca en un
+>    device es medición de F6/T6.4.
+> 3. **Un motivo más que el requisito no enumeraba**: `delimitador-no-soportado`. Son **seis** motivos de
+>    `mfi_unavailable`, no cuatro (ver la nota de RBM4.8, hallazgo 3).
+
 **RBM4.3** El sistema **no deberá** eliminar la clave `UISupportedExternalAccessoryProtocols` de `app.config.ts`: la lista vacía es el **guard anti-crash** del `init()` de la librería (force-cast `as! [String]` sobre un opcional), y el guard que lo verifica deberá seguir en verde.
 
 **RBM4.4** Cuando el build declara al menos una cadena de protocolo y un `ReaderDriver` declara un `TransportCapability` de kind `mfi` con esa misma `protocolString`, el sistema deberá resolver su binding como **disponible**, sin cambios de código.
 
 **RBM4.5** Si un driver declara una `protocolString` que el build **no** declara, entonces el sistema deberá marcar ese binding `available:false` con el motivo explícito ("falta declarar el protocolo en el build") y **no deberá** intentar una conexión que fallaría (RMV3.7).
+
+> **Reconciliación al as-built (F5, 2026-08-17) — este requisito es lo que obligó a meter `'mfi-ios'` en
+> `BUILT_ADAPTERS`, y a invertir el guard de F4 que exigía lo contrario.** En F4 el kind estaba
+> deliberadamente afuera porque el adapter no existía (declararlo construido habría dado `available:true`
+> sobre un transporte que `instantiateTransport` no podía montar). Con el adapter escrito, dejarlo afuera
+> pasa a ser **peor que ruido: miente el motivo** — el binding diría `adapter-no-construido` ("todavía no lo
+> soportamos") cuando la verdad es `build-sin-protocolos` ("falta la autorización del fabricante"), y el
+> motivo equivocado manda a buscar el dato equivocado. Es la distinción que este requisito compró para el
+> copy de la pantalla (RBM5.14). Y que el kind esté "construido" **no** lo vuelve montable: RBM5.5 cruza esa
+> mitad con la lista de protocolos declarada (hoy vacía) y `TRANSPORT_INSTALLABLE['mfi-ios']` incluye el gate
+> de datos, así que hoy la fila —si existiera un lector `mfi`— no sería accionable. El guard de
+> `wiring.test.ts` quedó escrito al revés (exige la PRESENCIA, citando este requisito y RBM4.7) y el mutante
+> que lo saca **muere**.
 
 > **Nota de reconciliación (F4, as-built 2026-08-17)**: el `unavailableReason` quedó en **TODOS** los bindings no disponibles y no solo en los de MFi — los que no lo son traen `'adapter-no-construido'`. El motivo es el que este mismo requisito compra: si `available:false` significara "MFi sin protocolo" cuando hay motivo y "cualquier otra cosa" cuando no lo hay, ese significado sería **implícito**, y es exactamente cómo la UI terminaría diciendo *"todavía no lo soportamos"* sobre un bastón al que solo le falta la autorización del fabricante. La consecuencia visible: tres `deepEqual` de bindings del delta multivendor (RS420 en Android sin construir, HID en iOS, HID en Android) ganaron esa clave — con `adapterKind`, `transportKind` y `available` **idénticos**, o sea que la prioridad de Android **no cambió** (RBM5.4 intacto). El invariante ("todo `available:false` trae motivo, todo `available:true` no lo trae") se verifica sobre la matriz completa de drivers × plataformas × builds, no sobre un caso elegido.
 
@@ -325,9 +360,64 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 **RBM4.7** El sistema deberá dejar documentado y **probado con una cadena sintética** el diff exacto que destraba MFi el día que llegue el dato (una entrada en la lista de `app.config.ts` + una `TransportCapability` en el driver), de modo que ese día no haya que escribir código.
 
+> **Reconciliación al as-built (F5, 2026-08-17)** — la prueba ejecutable quedó en **tres capas** y no en una,
+> porque "cero código ese día" tiene tres mitades independientes que pueden fallar solas:
+>
+> 1. **El DATO llega al gate.** `ea-protocols.test.ts` toma la config REAL de la app (`app.config.ts` es una
+>    función pura de `process.env`), le agrega la cadena sintética **en la ruta que producción lee**
+>    (`ios.infoPlist[KEY]`) y el binding pasa a `available:true`. Cubre el modo de falla silencioso de que la
+>    clave se mueva de rama y la lista quede en `[]` para siempre.
+> 2. **El TRANSPORTE anda con ese dato.** `adapter-mfi-ios.test.ts` corre el camino completo con la cadena
+>    declarada (listar → filtrar por protocolo → abrir la sesión con las opciones del driver → stream →
+>    EID), con **dos perfiles de driver** que difieren en la cadena Y en el fin de trama. Sin el segundo
+>    perfil, un literal hardcodeado adentro del transporte y el valor del driver serían los mismos bytes: los
+>    dos mutantes que re-hardcodean cada parámetro **mueren** nombrando el perfil B.
+> 3. **El transporte es ALCANZABLE con ese dato.** `wiring.test.ts` corre el invariante de alcanzabilidad
+>    inyectando solo esos dos datos y exige que `mfi-ios` quede honrado por la preferencia + ofrecido por la
+>    pantalla + con un escritor que lo persista. Es la mitad que el requisito no nombraba y que hace la
+>    diferencia entre "el dato entra" y "el operario puede usarlo".
+>
+> Y una consecuencia de proceso: **cualquier cosa que ese día haya que sacar de una lista es código**. Por eso
+> `'mfi-ios'` tuvo que salir de `NOT_SELECTABLE_AS_PREFERENCE` y entrar a `BUILT_ADAPTERS` **en este diff** y
+> no el día del dato (ver las notas de RBM4.5 y RBM5.6).
+
 **RBM4.8** El sistema deberá moldear la forma del adaptador sobre el **código nativo instalado** (`ios/conn/*.swift`, `device/NativeDevice.swift` de `react-native-bluetooth-classic`) y no sobre su README; si esa rama no expone en JS lo necesario para listar accesorios por protocolo, abrir la sesión y leer el stream, el sistema deberá **parar y reportar al leader**.
 
 > Es la lección literal del SPP: *"la forma que quedó salió de leer el código nativo, no su README"*, después de que el diseño original describiera un adapter que no funcionaba.
+
+> **Reconciliación al as-built (F5, 2026-08-17) — VEREDICTO: la rama iOS ALCANZA, no se para. Y el
+> requisito se cobró SIETE hallazgos, el último de los cuales dejaba el transporte muerto en verde.**
+>
+> Las tres capacidades existen en JS: **listar** (`getBondedDevices()` → `EAAccessoryManager
+> .connectedAccessories` mapeados por `NativeDevice.map()`), **abrir la sesión** (`connectToDevice(id,
+> options)` → `determineProtocolString` cruza el plist con `accessory.protocolStrings` y abre una
+> `EASession`) y **leer el stream** (evento `DEVICE_READ@<serialNumber>` vía `device.onDataReceived`). Con eso
+> la **pregunta abierta nº1** de este delta queda RESUELTA.
+>
+> Los hallazgos que cambiaron la forma del adapter (los seis primeros están completos en la cabecera de
+> `adapter-mfi-ios.ts`): (1) **no hay descubrimiento** en iOS (`startDiscovery` tira `Method not
+> implemented`) → solo listar y filtrar; (2) **el framing lo hace el nativo** y entrega mensajes ya
+> delimitados y sin terminador → pasarlos por `LineFramer` daría CERO lecturas para siempre; (3) el
+> terminador tiene que ser de **UN carácter** (el `read()` consume el delimitador con `index(after:)`, que
+> avanza uno) — en Android el multi-carácter sí funciona, así que los dos chequeos **no se pueden unificar**
+> y hay test diferencial; (4) **las opciones del SPP crashean acá** (force-cast de `charset` a
+> `CFStringEncoding`); (5) `available()` **no se llama nunca** (bucle infinito en el nativo + el selector que
+> el `.m` exporta no es el que el Swift implementa) y el guard es la AUSENCIA de la firma en `MfiNative`;
+> (6) **todo camino nativo toca CoreBluetooth** por su `CBCentralManager` lazy.
+>
+> **(7) — y es el que justifica esta nota: el WRAPPER JS de la lib se come `protocolStrings`.** El nativo sí
+> publica la clave, pero `BluetoothModule.getBondedDevices()` no devuelve los diccionarios: devuelve un
+> `BluetoothDevice` por accesorio que copia `name/address/id/bonded/deviceClass/rssi/type/extra` y **no
+> `protocolStrings`** (queda en su campo privado `_nativeDevice`; la interfaz `BluetoothNativeDevice` ni lo
+> declara, porque está pensada para Android). Leyendo solo la forma cruda —que es lo que la primera pasada de
+> esta fase hacía, con la cita del Swift correcta y la capa de arriba sin mirar— **todo** accesorio salía con
+> `protocolStrings: []`, `pickMfiAccessory` devolvía `null` SIEMPRE y el transporte quedaba clavado en
+> `mfi_accessory_not_found`. O sea: **RBM4.7 habría sido falso el día que llegara la cadena del fabricante**,
+> con el síntoma más caro de esta unidad ("no pasa nada", indistinguible de "el bastón está apagado") y con
+> toda la suite en verde. Cerrado aceptando las dos formas (`mfiProtocolStringsOf`) + un guard **derivado del
+> paquete instalado** que ata las tres afirmaciones de las que eso depende, para que un `pnpm update` que
+> cambie la forma nazca en rojo en vez de mudo. Es exactamente el modo de falla que este requisito nombra —
+> "moldear sobre el código instalado" incluye **la capa JS que envuelve al nativo**, no solo el Swift.
 
 **RBM4.9** El sistema deberá declarar el modo de ingesta de `mfi-ios` como `raw-line` (el accesorio entrega la trama del lector, no un EID limpio) y deberá parametrizarlo por el `frameParser` del driver (RBM1.1).
 
@@ -397,6 +487,32 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 > ofrece y (c) alguien escribe esa preferencia. Y su recíproca fail-closed: lo que este build **no** construye
 > no puede honrarse como preferencia. Hoy el único par no-piso es `ble-gatt` en Android (el que 🟠-2
 > destrabó); **F5 va a sumar `mfi-ios` en iOS y nace en rojo** hasta que tenga las tres cosas.
+
+> **Reconciliación al as-built (F5, 2026-08-17) — el guard de alcanzabilidad NO se aflojó, se le agregó la
+> distinción que le faltaba, y por qué eso importa.**
+>
+> Al escribir `adapter-mfi-ios.ts` el guard se puso en rojo, como estaba previsto. Dos de las tres cosas se
+> cablearon sin discusión: la preferencia lo honra (`'mfi-ios'` salió de `NOT_SELECTABLE_AS_PREFERENCE`, que
+> era una deuda **con fecha** — y tenía que salir en este diff por RBM4.7: sacarlo el día del dato sería
+> escribir código) y el adapter escribe su `adapterKind` al conectar. La tercera —"la pantalla lo ofrece"— **no
+> se puede cumplir hoy, y no por falta de cableado**: `transportChoices` recorre el REGISTRO DE LECTORES, y
+> **ningún driver declara `mfi` porque RBM4.6 lo prohíbe**. O sea que la fila no existe ni en un iPhone, y eso
+> es un DATO faltante que un requisito impone, no un mecanismo faltante.
+>
+> Las dos salidas fáciles eran malas: aflojar el guard ("si no hay lector, no exijo nada") lo dejaba pasando
+> por vacuidad para cualquier transporte futuro, y "cumplirlo" registrando un driver con una cadena inventada
+> viola RBM4.6 y convierte una incógnita en un verde falso. As-built:
+> - el invariante exime el par **solo si NINGÚN lector del registro resuelve a ese kind**, la lista de pares
+>   exentos es **cerrada y nombrada** (`['ios/mfi-ios']`) y el motivo se **verifica** (el registro real no
+>   tiene lectores `mfi`), así que un par exento nuevo es una decisión visible en el diff;
+> - y hay un **test hermano** que corre el MISMO invariante con un driver MFi sintético + su cadena declarada
+>   y exige que el par pase entero (honrado + ofrecido + escrito), con la contraprueba de que sin ese driver
+>   sale exento. Sin ese hermano, "no se puede cumplir" sería indistinguible de "no lo cableé" — que es
+>   exactamente cómo se afloja un guard sobre la ausencia sin que se note.
+>
+> Los cuatro mutantes de esta zona **mueren**: volver a meter `'mfi-ios'` en `NOT_SELECTABLE_AS_PREFERENCE`,
+> sacarlo de `BUILT_ADAPTERS`, borrarle el `adapterKind` a su `writeRememberedDevice`, y ponerle
+> `acceptsLegacy: true` al filtro del bastón recordado.
 >
 > **Lo que sigue sin resolver, dicho como límite**: en Android el único driver `ble-gatt` del registro es el
 > del **emulador del banco** (RBM5.11 no deja inventar el del HR5 v3), así que hoy esa fila dice *"Emulador
@@ -458,6 +574,26 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 > Dos límites declarados del as-built, para que no se lean como olvido:
 > - **La fila corta del tab "Más"** (`connectionRowStatus`) **no conoce el transporte**: su call site no calcula binding. O sea que con GATT la card dice *"Buscando el bastón…"* y la fila sigue diciendo *"Reintentando…"*. Lo que el proyecto exige que no se contradiga —el **tono**— se sigue verificando, ahora también con el `transportKind` nuevo en la matriz. Unificar el texto exigiría que "Más" calcule el binding (scope nuevo).
 > - **La lista de protocolos de `mfi-ios` no entra en `BUILT_ADAPTERS`** hasta F5 (ver la nota de T4.8), así que hoy el binding de MFi en producción diría `adapter-no-construido` — pero es inalcanzable de todos modos, porque ningún driver declara `mfi` (RBM4.6). Las dos ramas de copy se ejercitan con bindings sintéticos.
+
+> **Reconciliación al as-built (F5, 2026-08-17) — dos cambios en QUÉ se ofrece, y un límite que se mantiene.**
+>
+> 1. **El párrafo de arriba queda viejo en su primera mitad**: `'mfi-ios'` YA entra en `BUILT_ADAPTERS` (nota
+>    de RBM4.5), así que el binding de un lector MFi ya no diría `adapter-no-construido` sino
+>    `build-sin-protocolos` — el motivo honesto, que es el que la rama de copy de MFi necesita para decir
+>    *"falta la autorización del fabricante"* en vez de *"todavía no lo soportamos"*. La segunda mitad sigue
+>    en pie: es **inalcanzable de todos modos** porque ningún driver declara `mfi` (RBM4.6).
+> 2. **La FILA del lector MFi ahora SÍ se ofrecería**, y eso invirtió un test de F4. Antes `'mfi-ios'` estaba
+>    vetado como preferencia, así que `transportChoices` lo dejaba afuera "porque montarlo no haría nada"; con
+>    el adapter construido, un lector MFi produce su fila **con `binding.available:false` y su motivo**, y con
+>    `installable:false` (el probe incluye el gate de datos) → la fila se **dice y no es accionable**, que es
+>    exactamente lo que este requisito pide y el mismo criterio que ya usa `installable:false` para el BLE en
+>    un APK sin el módulo nativo. Esconderla sería el bug simétrico: el operario con un Tru-Test "i" no
+>    tendría ninguna explicación de por qué su bastón no aparece.
+> 3. **Lo que sigue sin poder vetarse visualmente**: nada de esto se ve hoy en ninguna plataforma (no hay
+>    lector `mfi`), así que el Gate 2.5 de F5 es el ORÁCULO DE NO-REGRESIÓN de `/baston` (una sola fila, cero
+>    rastro del copy de MFi, y la pantalla entera con una preferencia `mfi-ios` sembrada en storage — el
+>    escenario nuevo que F5 habilita). El veto visual de las dos ramas de copy sigue siendo de device y queda
+>    en T6.6/RBM9.7, y hasta entonces está cubierto por `connection-view.test.ts` con bindings sintéticos.
 
 ## RBM6. Banco del emulador ESP32 en `MODO_GATT` (T5)
 
@@ -606,7 +742,7 @@ Este delta se considera implementado cuando:
 
 Huecos entre el contexto, el as-built y los terceros. **No se improvisaron resoluciones.**
 
-1. **¿La rama iOS de `react-native-bluetooth-classic` expone en JS lo que el adapter MFi necesita?** El contexto verificó que existe el código nativo (`ios/conn/*.swift`); lo que no está verificado es la **superficie JS** (listar accesorios por protocolo, abrir sesión, leer el stream). RBM4.8 obliga a moldear sobre el fuente instalado y a **parar y reportar** si no alcanza. No bloquea el `spec_ready`; es el primer paso de la fase de MFi.
+1. ~~**¿La rama iOS de `react-native-bluetooth-classic` expone en JS lo que el adapter MFi necesita?**~~ **RESUELTA (F5, 2026-08-17): ALCANZA — no se para.** Las tres capacidades existen (`getBondedDevices` para listar con `protocolStrings`, `connectToDevice` para abrir la `EASession`, el evento `DEVICE_READ@<serial>` para el stream). Pero la respuesta trajo **siete hallazgos** que cambiaron la forma del adapter, y el séptimo era un modo de falla mudo: **el wrapper JS de la lib no copia `protocolStrings`** (lo deja en su privado `_nativeDevice`), así que leer solo la forma cruda dejaba el filtro por protocolo muerto y RBM4.7 falso el día que llegue la cadena. Detalle completo en la nota de reconciliación de **RBM4.8**. La lección de método: *"moldear sobre el código instalado"* incluye **la capa JS que envuelve al nativo**, no solo el Swift — la primera pasada de esta fase citó el Swift correcto y no miró la capa de arriba.
 2. ~~**¿`react-native-ble-plx` es compatible con RN 0.85.3 bridgeless?**~~ **RESUELTA (F2, 2026-08-17): COMPATIBLE, FIRME.** La premisa de esta pregunta era falsa (la lib **no** trae C++/JSI: cero fuentes C++). Veto en dos mitades —inspección de fuente + `:app:assembleDebug` verde en 3m 23s, 0 builds de EAS— en `progress/veto_ble-plx.md`. Queda **declarado** lo que el build no prueba (la reachability del puente en runtime: es un módulo de puente legacy bajo la capa de interop, y lo mide el banco de RBM6.1). El delta **no** se replantea; F3 está desbloqueada. Ver la nota de reconciliación bajo RBM2.18.
 3. **Prioridad de iOS con HID último.** El contexto §4 fija `mfi → ble-gatt → manual`; RMV2.1 tenía `['ble-hid','ble-gatt','mfi']`. La traducción (RBM5.1) invierte HID y MFi respecto del delta anterior. Está justificada en el requisito, pero es un cambio de una tabla ya aprobada: **confirmar en Puerta 1**.
 4. **Uniones nuevas `'ble-gatt'` y `'mfi-ios'`** extienden `StickAdapter['kind']`, `AdapterKind`, `ADAPTER_KINDS`, `ADAPTER_INGEST_MODE` y los switches exhaustivos de `permissions.ts` e `instantiateTransport`. Es aditivo y 04-owned (mismo precedente que `'simulator'`), pero toca archivos del core as-built — confirmar que se acepta.

@@ -88,14 +88,28 @@ const ALL_BUILT = [
 ] as const;
 
 /**
- * Lo que el build REAL construye hoy: sin `hid-wedge` (gate de R8.7) ni `mfi-ios` (su adapter es F5).
+ * Lo que el build REAL construye hoy: todo menos `hid-wedge`, que sigue gateado por el gate FÍSICO
+ * (R8.7/RBM8.0) y cuyo archivo es un placeholder de 22 líneas.
+ *
+ * **F5 le agregó `'mfi-ios'`**, y la autorización es RBM4.5 + RBM4.7 (el motivo largo está en el guard de
+ * `wiring.test.ts`): el adapter existe, así que dejarlo afuera haría que el binding de un lector MFi dijera
+ * `adapter-no-construido` ("todavía no lo soportamos") en vez de `build-sin-protocolos` ("falta la
+ * autorización del fabricante"). Que ESTÉ construido no significa que se pueda montar: RBM5.5 cruza esa
+ * mitad con la lista de protocolos declarada, que hoy está vacía.
  *
  * Es un ESPEJO de `BUILT_ADAPTERS` de `StickConnectionScreen.tsx` —que es un `.tsx` y no se puede importar
  * desde node:test—, y un espejo que puede driftar no prueba nada: el conjunto completo está fijado en
  * `wiring.test.ts` ("la pantalla pasa la lista REAL de protocolos declarados"), así que un kind que entre o
  * salga de la pantalla pone eso en rojo.
  */
-const BUILT_TODAY = ['manual', 'mock', 'web-serial', 'spp-android', 'ble-gatt', 'simulator'] as const;
+const BUILT_TODAY = ['manual', 'mock', 'web-serial', 'spp-android', 'ble-gatt', 'mfi-ios', 'simulator'] as const;
+
+/**
+ * Un build hipotético SIN el adapter de MFi. No es el de hoy (hoy sí está, ver arriba): existe para poder
+ * ejercitar el ORDEN de los chequeos de `available` ("construido primero"), que sin un build donde falte el
+ * adapter no se puede observar.
+ */
+const BUILT_WITHOUT_MFI = ['manual', 'mock', 'web-serial', 'spp-android', 'ble-gatt', 'simulator'] as const;
 
 /** Cadena SINTÉTICA (RBM4.6: no se inventa la de ningún fabricante real). */
 const SYNTHETIC_PROTOCOL = 'com.ejemplo.lector-sintetico';
@@ -364,7 +378,10 @@ test('RBM5.5: el `available` de mfi-ios es una CONJUNCIÓN — falla cualquiera 
   // (c) NO construido ∧ declarado → 'adapter-no-construido'. El ORDEN del chequeo es "construido
   // primero" y es la parte falsificable: si el adapter no existe en este build, el estado del plist es
   // irrelevante y decir "falta el protocolo" mandaría a buscar el dato equivocado.
-  assert.deepEqual(shape(selectReaderBinding(env('ios', RS420_WITH_MFI, BUILT_TODAY, conProtocolo))), {
+  // ⚠️ Desde F5 el build REAL sí trae el adapter, así que este caso usa `BUILT_WITHOUT_MFI` (un build
+  // hipotético). Antes usaba `BUILT_TODAY` y era lo mismo; ahora son dos cosas distintas y mezclarlas
+  // volvería este caso INALCANZABLE — o sea, el orden del chequeo dejaría de estar probado.
+  assert.deepEqual(shape(selectReaderBinding(env('ios', RS420_WITH_MFI, BUILT_WITHOUT_MFI, conProtocolo))), {
     adapterKind: 'mfi-ios',
     transportKind: 'mfi',
     available: false,
@@ -372,9 +389,13 @@ test('RBM5.5: el `available` de mfi-ios es una CONJUNCIÓN — falla cualquiera 
   });
   // (d) ninguna de las dos → sigue siendo 'adapter-no-construido' (el mismo orden).
   assert.equal(
-    shape(selectReaderBinding(env('ios', RS420_WITH_MFI, BUILT_TODAY, [])))?.unavailableReason,
+    shape(selectReaderBinding(env('ios', RS420_WITH_MFI, BUILT_WITHOUT_MFI, [])))?.unavailableReason,
     'adapter-no-construido',
   );
+  // ANTI-VACUIDAD de (c)/(d): el fixture tiene que DIFERIR del build de hoy en exactamente `mfi-ios`. Si
+  // alguien "unificara" las dos listas, los dos casos de arriba pasarían a medir lo mismo que (a)/(b).
+  assert.equal(BUILT_WITHOUT_MFI.includes('mfi-ios' as never), false);
+  assert.equal((BUILT_TODAY as readonly string[]).includes('mfi-ios'), true);
 });
 
 test('RBM4.6: el RS420 REAL sigue sin declarar mfi → en iOS su binding es null, no un MFi fantasma', () => {
@@ -734,25 +755,64 @@ test('RMV4.3 (triple-guard 1): selectTransportAdapter NUNCA devuelve simulator s
 
 // ─── 🟡-1 del review de F4: un kind que este build NO PUEDE CONSTRUIR no se honra como preferencia ──
 
-test('RBM5.6 fail-closed: una preferencia `mfi-ios` no se honra hasta que F5 construya su adapter', () => {
-  // Es el MISMO escenario con el que se justificó gatear `hid-wedge`, y con fecha: `instantiateTransport`
-  // devuelve `null` para `'mfi-ios'` (el adapter es F5), así que honrar esa preferencia le saca al iPhone el
-  // `ble-gatt` que le corresponde por piso y lo deja **sin transporte, en silencio**. Y F5 **va a escribir**
-  // ese `adapterKind`, así que el tratamiento asimétrico era una deuda con fecha, no una hipótesis.
+test('RBM4.4/RBM5.2: la preferencia `mfi-ios` SÍ se honra en iOS (F5 construyó su adapter) y en ningún otro lado', () => {
+  // ── ESTE TEST REEMPLAZA A `RBM5.6 fail-closed: una preferencia mfi-ios no se honra hasta que F5
+  //    construya su adapter`, y la autorización es **RBM4.1/RBM4.4** + **RBM5.2** ───────────────────────
+  // El test viejo era correcto en F4 y quedó obsoleto A PROPÓSITO: decía que honrar esa preferencia dejaba
+  // al iPhone sin transporte porque `instantiateTransport('mfi-ios')` devolvía `null`. En F5
+  // `adapter-mfi-ios.ts` EXISTE y ese switch lo construye (detrás del gate de datos de RBM4.2), así que el
+  // motivo del veto desapareció. Y tenía que desaparecer en el MISMO diff, por RBM4.7: si `mfi-ios` siguiera
+  // en `NOT_SELECTABLE_AS_PREFERENCE`, el día que el fabricante entregue su cadena habría que **sacarlo a
+  // mano** — o sea escribir código, que es justo lo que ese requisito prohíbe.
+  //
+  // Lo que NO cambió es el fail-closed, y es lo que este test conserva: fuera de iOS el transporte MFi no
+  // existe (RBM5.2/RBM5.3 → `adapterForTransport('mfi', ≠ios)` es `null`), así que un registro escrito en un
+  // iPhone y restaurado en un Android **no** puede montarlo: se cae al piso por plataforma.
   assert.equal(
     selectTransportAdapter({ platformOS: 'ios', mode: 'auto', preferredAdapter: 'mfi-ios' }),
-    'ble-gatt',
-    'la preferencia mfi-ios tiene que caer al piso de iOS, no dejar al operario sin transporte',
+    'mfi-ios',
+    'con el adapter construido, la preferencia del bastón MFi tiene que ganarle al piso de iOS (RBM5.6)',
   );
+  // Fuera de iOS: NUNCA, y se cae al piso de cada plataforma (no a "sin transporte").
+  for (const [platformOS, piso] of [
+    ['android', 'spp-android'],
+    ['web', 'web-serial'],
+    ['macos', 'manual'],
+  ] as const) {
+    assert.equal(
+      selectTransportAdapter({ platformOS, mode: 'auto', preferredAdapter: 'mfi-ios' }),
+      piso,
+      `${platformOS}: ExternalAccessory no existe acá → la preferencia mfi-ios cae al piso`,
+    );
+  }
+  // Y RBM5.9 sigue intacto: los tres modos que cortan antes de la preferencia no se enteran de nada.
+  for (const [mode, esperado] of [['mock', 'mock'], ['manual', 'manual'], ['demo', 'simulator']] as const) {
+    assert.equal(selectTransportAdapter({ platformOS: 'ios', mode, preferredAdapter: 'mfi-ios' }), esperado);
+  }
+  // ⚠️ Que la preferencia se HONRE no significa que el transporte se monte hoy: `instantiateTransport`
+  // consulta `isMfiTransportAvailable()`, que incluye el gate de datos de RBM4.2 (hoy la lista de protocolos
+  // del build está vacía) → devuelve `null` y la app queda manual-first, que es la verdad. Son dos
+  // decisiones separadas a propósito, igual que con `ble-gatt` y su módulo nativo.
+});
+
+test('R8.7/RBM5.6: el ÚNICO kind vetado como preferencia sigue siendo `hid-wedge` (y no por omisión)', () => {
+  // La contraparte del test de arriba: al sacar `mfi-ios` de `NOT_SELECTABLE_AS_PREFERENCE`, lo que queda
+  // vetado tiene que quedar vetado **y medido**, no "vetado porque nadie lo escribe". El gate de `hid-wedge`
+  // es el FÍSICO (RBM8.0: el adapter no se escribe hasta que el gate pase) y su archivo es un placeholder.
+  //
+  // El oráculo se DERIVA del union: se recorre TODO `AdapterKind` y se exige que el conjunto de los que la
+  // selección NO honra siendo usables en la plataforma sea exactamente `{hid-wedge}`. Escrito así, un veto
+  // nuevo (o uno que se caiga) aparece solo, sin depender de que alguien venga a actualizar una lista.
+  const vetados = new Set<string>();
   for (const platformOS of ['ios', 'android', 'web', 'macos']) {
-    for (const mode of ['auto', 'mock', 'manual', 'demo'] as const) {
-      assert.notEqual(
-        selectTransportAdapter({ platformOS, mode, preferredAdapter: 'mfi-ios' }),
-        'mfi-ios',
-        `${platformOS}/${mode}: mfi-ios no se monta hasta que exista adapter-mfi-ios.ts (F5)`,
-      );
+    for (const kind of ADAPTER_KINDS) {
+      if (!isAdapterUsableOn(kind, platformOS)) continue; // no existe acá: no es un veto, es una ausencia
+      if (selectTransportAdapter({ platformOS, mode: 'auto', preferredAdapter: kind }) !== kind) {
+        vetados.add(kind);
+      }
     }
   }
+  assert.deepEqual([...vetados], ['hid-wedge'], 'cambió el conjunto de transportes vetados como preferencia');
 });
 
 // ─── 🟠-2 del review de F4: `transportChoices` — la ENTRADA por gesto a la preferencia ──────────────
@@ -835,20 +895,44 @@ test('RBM5.9/RBM5.3: en web y en iOS la lista de alternativas es VACÍA (cero ca
 });
 
 test('🟠-2: un transporte que la selección NO honraría no se ofrece (gateado o imposible en la plataforma)', () => {
-  // Anti-afordancia-muerta, y el oráculo NO es una lista de kinds prohibidos: se DERIVA de
-  // `selectTransportAdapter`. Con `mfi-ios` y `hid-wedge` declarados construidos, sus bindings salen
-  // `available:true` y aun así no se ofrecen, porque montarlos no haría nada.
+  // ── ESTE TEST CAMBIÓ EN F5, y la autorización es **RBM4.1/RBM4.4** (`mfi-ios` ya no está gateado) ─────
+  // Antes esperaba `[]` con un registro de `{MFi, HID}` en iOS, porque los DOS kinds estaban vetados como
+  // preferencia. En F5 el adapter de MFi existe y su preferencia se honra, así que la fila del lector MFi
+  // **tiene que aparecer** — y aparece con su binding `available:false / build-sin-protocolos`, que es
+  // exactamente lo que RBM5.14 pide mostrar ("reconocemos este bastón pero falta la autorización del
+  // fabricante" + carga manual, sin intentar conectar). Esconderla sería el bug simétrico: el operario con
+  // un Tru-Test "i" no tendría NINGUNA explicación de por qué su bastón no aparece.
+  //
+  // Lo que NO cambió es el invariante ni su oráculo: no es una lista de kinds prohibidos, se DERIVA de
+  // `selectTransportAdapter`. `hid-wedge` sigue afuera porque su gate es el físico (R8.7/RBM8.0).
   const registry = [MFI_ONLY_DRIVER, HID_DRIVER];
   const conTodo = transportChoices(
     choicesEnv({ platformOS: 'ios', registry, builtAdapters: [...ALL_BUILT] as AdapterKind[] }),
   );
-  assert.deepEqual(conTodo, [], 'mfi-ios y hid-wedge están gateados: ofrecerlos sería una fila que no monta nada');
-  // Contraprueba de que el fixture SÍ produce bindings (si no, el test pasaría por vacuidad).
+  assert.deepEqual(
+    conTodo.map((c) => c.adapterKind),
+    ['mfi-ios'],
+    'hid-wedge sigue gateado (ofrecerlo sería una fila que no monta nada) y mfi-ios ya no lo está',
+  );
+  // La fila del MFi dice la VERDAD del build: el adapter está, la cadena del fabricante no (RBM4.5).
+  assert.equal(conTodo[0].binding.available, false);
+  assert.equal(conTodo[0].binding.unavailableReason, 'build-sin-protocolos');
+  assert.equal(conTodo[0].driver, MFI_ONLY_DRIVER, 'la fila promete el lector que el adapter va a usar');
+  // Contraprueba de que el fixture SÍ produce bindings de los dos (si no, el test pasaría por vacuidad).
   assert.equal(
     selectReaderBinding(env('ios', MFI_ONLY_DRIVER, ALL_BUILT, ['com.example.reader']))?.available,
     true,
   );
   assert.equal(selectReaderBinding(env('ios', HID_DRIVER, ALL_BUILT))?.adapterKind, 'hid-wedge');
+  // Y el otro medio del invariante, el que este test siempre midió: un transporte IMPOSIBLE en la
+  // plataforma tampoco se ofrece (el mismo lector MFi en Android/web → nada).
+  for (const platformOS of ['android', 'web'] as const) {
+    assert.deepEqual(
+      transportChoices(choicesEnv({ platformOS, registry, builtAdapters: [...ALL_BUILT] as AdapterKind[] })),
+      [],
+      `${platformOS}: ni MFi ni HID son alcanzables acá`,
+    );
+  }
 });
 
 test('🟠-2: TODA alternativa ofrecida se monta de verdad si se la elige (invariante sobre la matriz)', () => {

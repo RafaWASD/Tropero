@@ -35,12 +35,13 @@ import { isAdapterUsableOn, selectReaderBinding, type ReaderBinding } from './se
 // `ADAPTER_KINDS`, `permissionModelFor`) y el switch de `instantiateTransport`: eso es el mecanismo, no
 // un efecto colateral.
 //
-// `'mfi-ios'` entra en **F4** y no en F5 (donde el task lo ponía, T5.3), por una razón de compilación y
+// `'mfi-ios'` entró en **F4** y no en F5 (donde el task lo ponía, T5.3), por una razón de compilación y
 // no de gusto: T4.1/RBM5.2 exigen que `adapterForTransport('mfi','ios')` devuelva ese literal, y
 // RBM5.5 que su binding calcule `available` — o sea que el union tiene que tenerlo para que F4
-// compile. Lo que F4 declara es SOLO el kind y sus tablas; el ADAPTER (`adapter-mfi-ios.ts`) sigue
-// siendo F5 y hasta entonces `instantiateTransport('mfi-ios')` devuelve `null` (transporte no montado →
-// carga manual como piso, RBM5.10).
+// compile. En **F5** llegó su adapter (`adapter-mfi-ios.ts`), así que `instantiateTransport('mfi-ios')`
+// ya lo construye — pero **detrás del gate de datos de RBM4.2**: mientras el build no declare ninguna
+// cadena de protocolo MFi (hoy), el guard devuelve `null` sin tocar el módulo nativo y la app queda con la
+// carga manual como piso (RBM5.10).
 export type AdapterKind =
   | 'manual'
   | 'mock'
@@ -87,12 +88,13 @@ export interface SelectionEnv {
  *   · `'hid-wedge'`: GATEADO por el gate físico de R8.7/RBM8 (`adapter-hid-wedge.ts` es un placeholder).
  *     El mundo malo concreto: un registro manoseado —o un downgrade después de que F7 exista— le saca a
  *     Android su `spp-android` y lo deja sin transporte, en silencio.
- *   · `'mfi-ios'` (🟡-1 del review de F4): el kind existe desde F4 porque el mapeo de RBM5.2 y el
- *     `available` de RBM5.5 lo exigen, pero `adapter-mfi-ios.ts` es **F5** y hasta entonces
- *     `instantiateTransport('mfi-ios')` devuelve `null`. Sin este gate, una preferencia `'mfi-ios'` le
- *     quita a un iPhone el `ble-gatt` que le corresponde por piso y lo deja **sin transporte**, en
- *     silencio — el MISMO escenario con el que se justificó gatear `hid-wedge`, y con fecha: **F5 va a
- *     escribir ese `adapterKind`**. Tratar los dos casos distinto era la asimetría que el review marcó.
+ *   · ~~`'mfi-ios'`~~ **SALIÓ en F5** (entró en F4 por el 🟡-1 de su review, cuando `adapter-mfi-ios.ts`
+ *     todavía no existía). Ahora el adapter existe y `instantiateTransport('mfi-ios')` lo construye, así
+ *     que el criterio de esta lista ya no lo alcanza — y dejarlo acá rompería RBM4.7: el día que el
+ *     fabricante entregue su cadena de protocolo habría que **sacarlo a mano**, o sea escribir código, que
+ *     es exactamente lo que ese requisito prohíbe. Tiene que salir en el MISMO diff que lo construye
+ *     (`BUILT_ADAPTERS` + `instantiateTransport` + su escritor de preferencia), y el guard de
+ *     alcanzabilidad de `wiring.test.ts` verifica las dos direcciones.
  *
  * Los otros kinds que no son transportes elegibles por preferencia (`manual`, `mock`, `simulator`) ya
  * quedan afuera por `isAdapterUsableOn`: ningún `TransportKind` mapea a ellos.
@@ -102,7 +104,7 @@ export interface SelectionEnv {
  * alcanzabilidad de `wiring.test.ts` verifica las dos direcciones — que nada no-construido se honre, y
  * que nada construido quede sin forma de elegirse.
  */
-const NOT_SELECTABLE_AS_PREFERENCE = ['hid-wedge', 'mfi-ios'] as const satisfies readonly AdapterKind[];
+const NOT_SELECTABLE_AS_PREFERENCE = ['hid-wedge'] as const satisfies readonly AdapterKind[];
 
 /**
  * ¿Se honra la preferencia del bastón recordado? (RBM5.6.) Dos condiciones, las dos fail-closed:
