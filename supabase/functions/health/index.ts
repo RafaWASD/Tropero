@@ -45,12 +45,16 @@ serveEf('health', async () => {
       // dos secrets pueden convivir. La limpieza (sacar el `?? RAFAQ_ENV`) está anotada en
       // `docs/backlog.md` con su condición: primero setear `MITROPERO_ENV`, después sacar el fallback.
       //
-      // ⚠️ MEDIDO el 2026-08-17 (GET al endpoint de DEV): la función deployada devuelve `env: "unknown"`,
-      // o sea que en DEV el secret NO está seteado **con ninguno de los dos nombres** — al revés de lo que
-      // suponía el plan de rebrand. Y nadie se enteró en todo este tiempo porque la suite `health` sólo
-      // valida el JUEGO DE CLAVES del body (R7.5), nunca el VALOR de `env`. El fallback se mantiene igual:
-      // el estado del secret en PROD no se midió (probar PROD era una acción externa que esta sesión no
-      // hizo) y cuesta un `??`.
+      // ⚠️ MEDIDO el 2026-08-17 (GET al endpoint de DEV): la función deployada devolvía `env: "unknown"`,
+      // o sea que en DEV el secret NO estaba seteado **con ninguno de los dos nombres** — al revés de lo
+      // que suponía el plan de rebrand. Y nadie se enteró en todo ese tiempo porque la suite `health` sólo
+      // validaba el JUEGO DE CLAVES del body (R7.5), nunca el VALOR de `env`.
+      // RESUELTO el 2026-08-17: (1) se seteó `MITROPERO_ENV=development` en DEV + redeploy → responde
+      // `env: "development"`; (2) el punto ciego está cerrado con `C4(e)` en `supabase/tests/health/run.cjs`
+      // (`env` ∈ conjunto cerrado {development, production}, nunca 'unknown'; dominio en
+      // `supabase/tests/health/env-oracle.cjs`). Si alguien saca el fallback de abajo sin que el nombre
+      // nuevo esté seteado en ese proyecto, la suite ahora se pone ROJA en vez de mirar para otro lado.
+      // El fallback se mantiene igual: el estado del secret en PROD no se midió y cuesta un `??`.
       env: Deno.env.get('MITROPERO_ENV') ?? Deno.env.get('RAFAQ_ENV') ?? 'unknown',
     });
   } catch (err) {

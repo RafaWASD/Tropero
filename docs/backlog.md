@@ -29,22 +29,43 @@ bloquea**; hacerlo a medias tampoco rompe, por eso está escrito con el orden ex
 La EF `health` lee `MITROPERO_ENV ?? RAFAQ_ENV ?? 'unknown'`, así que anda igual antes y después de que
 lo setees. **El código nuevo todavía no está deployado** (entra con el próximo deploy de `health`).
 
-⚠️ **Medido el 2026-08-17** (GET a `/functions/v1/health` de DEV): hoy devuelve
-`{"ok":true,"schema_version":"unknown","env":"unknown"}`. O sea que **en DEV el secret no está seteado con
-ninguno de los dos nombres** — el plan de rebrand suponía que sí. No pasó nada malo, pero tampoco se
-enteró nadie: el label de ambiente del monitor viene diciendo `unknown` desde que se deployó.
+⚠️ **Medido el 2026-08-17** (GET a `/functions/v1/health` de DEV): devolvía
+`{"ok":true,"schema_version":"unknown","env":"unknown"}`. O sea que **en DEV el secret no estaba seteado
+con ninguno de los dos nombres** — el plan de rebrand suponía que sí. No pasó nada malo, pero tampoco se
+enteró nadie: el label de ambiente del monitor venía diciendo `unknown` desde que se deployó.
 
-1. `supabase secrets set MITROPERO_ENV=development --project-ref <dev>` (y `=production` en PROD si allá
-   existe el secret). Los dos secrets pueden convivir: setear el nuevo no rompe nada.
-2. **Recién después**, sacar el `?? Deno.env.get('RAFAQ_ENV')` de `supabase/functions/health/index.ts` y
-   borrar el secret viejo.
+✅ **HECHO (2026-08-17)**: se seteó `MITROPERO_ENV=development` en DEV y se re-deployó `health`. Hoy
+responde `{"ok":true,"schema_version":"unknown","env":"development"}` (el `schema_version: "unknown"` de
+DEV es correcto y **no es parte de esto**: sale del ledger `ops.applied_migrations`, que sólo bootstrapea
+el camino de replay `apply-all-migrations.mjs`, y en DEV las migraciones se aplicaron de a una).
 
-⚠️ **No hay guard que cubra esto**: la suite `health` sólo valida el juego de claves del body, no el
-**valor** de `env`. Si se saca el fallback antes de setear el secret, el endpoint reporta
-`env: "unknown"` y el único que se entera es quien mire el monitor. Si al hacer el paso 2 querés cerrar
-ese agujero, el oráculo barato es agregar a `supabase/tests/health/run.cjs` un `assert` de que `env` es
-`development`/`production` (nunca `unknown`) — hoy no está puesto porque exigiría que el secret esté
-seteado en DEV para dar verde, y este trabajo se hizo sin tocar nada externo.
+1. ~~`supabase secrets set MITROPERO_ENV=development --project-ref <dev>`~~ **hecho en DEV**. Falta
+   `=production` en PROD si allá existe el secret. Los dos secrets pueden convivir: setear el nuevo no
+   rompe nada.
+2. **Pendiente**: sacar el `?? Deno.env.get('RAFAQ_ENV')` de `supabase/functions/health/index.ts` y borrar
+   el secret viejo. Ahora sí es seguro hacerlo en DEV (el nombre nuevo ya está seteado); en PROD, recién
+   después del paso 1 de allá. El guard de abajo cubre las dos.
+
+✅ **El agujero de observabilidad quedó CERRADO (2026-08-17)** — era el punto ciego que hizo que esto
+pasara semanas sin que nadie se enterara: la suite `health` validaba el **juego de claves** del body
+(C4(c)/R7.5) y nunca el **valor** de `env`, así que un endpoint de salud que reporta mal el ambiente daba
+verde. Ahora hay `C4(e)` en `supabase/tests/health/run.cjs`: `env` tiene que estar en un **conjunto
+cerrado** (`development` | `production`) y nunca ser `unknown`.
+
+- El juicio vive en `supabase/tests/health/env-oracle.cjs`, **puro**, con `KNOWN_HEALTH_ENVS` como fuente
+  única del dominio. Un ambiente nuevo legítimo **nace en rojo** y el mensaje dice exactamente qué tocar.
+- **Cerrado y no `!== 'unknown'`** porque los vecinos del modo observado son igual de silenciosos y el
+  laxo los deja pasar: typo, mayúscula, espacio pegado por el shell, el vocabulario de `EXPO_PUBLIC_ENV`
+  del cliente (`preview`/`e2e`) y el de `--env` de los scripts (`dev`/`prod`). Un label que el monitor no
+  puede mapear a un proyecto vale lo mismo que `unknown`.
+- **Falsificado sin tocar nada externo** (dessetear el secret es una acción sobre DEV que un test no puede
+  provocar): `C4(e-mutantes)` ejerce el mismo `assertHealthEnv` contra bodies fabricados, y aparte se
+  verificó con `fetch` stubeado que C4(e) se pone **rojo** con el body viejo (`env: "unknown"`) mientras
+  C4(c) sigue **verde** — la demostración de que la suite anterior era ciega a esto.
+- **Lo que este guard NO cubre** (residual conocido, no bloqueante): que el ambiente reportado sea el que
+  **corresponde al proyecto** al que se le está pegando. Un DEV etiquetado `production` (o al revés) pasa
+  C4(e). Cerrarlo sería cruzar el ref de `SUPABASE_URL` contra `SUPABASE_PROJECT_REF_PROD`; se dejó afuera
+  a propósito por disciplina de alcance.
 
 ### 2. `MITROPERO_CONFIRM_PROD` — memoria muscular (no hay paso obligatorio)
 
@@ -1686,6 +1707,7 @@ La página `/invite` no limpia el token de la barra de direcciones con `history.
 
 1. **`canCloseOrphanSocket` pregunta por la GENERACIÓN, no por la DIRECCIÓN** (⚪-K). El predicado actual es *"¿sigo siendo la generación vigente?"*, que es lo correcto cuando el intento nuevo va a la **misma** MAC (el nativo reusa la conexión existente, así que cerrarla le mataría el socket al que conectó). Pero con **direcciones distintas** —el operario elige otro bastón mientras el primero está abriendo— el socket huérfano de A queda **abierto y sin nadie drenando su `StringBuffer`**, que no tiene cota: la próxima reconexión a A se come su primera trama, que es el mecanismo exacto de BENCH-2. **El predicado que lo cierra, para no re-derivarlo**: cerrar también cuando la dirección del intento viejo **no** es la del vigente, o sea `this.closed || gen === this.connectGeneration || !sameAddress(target, this.inFlightTarget)`. Hoy no es alcanzable porque el único camino que cambia de dirección con un intento en vuelo (`pendingTarget`) hace `teardownStreams()` antes de abrir el nuevo.
 2. **`onChooseDevice` escribe el `vendorId` del driver en la clave del bastón recordado, no una MAC** (`StickConnectionScreen.tsx`, la fila de capacidad de build del camino web/iOS). Era inocuo mientras nadie leía esa clave sin gesto; **R6.4 ahora la lee para auto-conectar**, así que si esa fila vuelve a ser accionable en un camino con `spp-android` montado, el arranque intentaría conectar a `"allflex-rs420"` y **moriría en silencio** (el nativo rechaza la MAC inválida, el error se captura, y el operario ve "no encontramos el bastón"). El comentario de ahí dice *"cuando el adapter SPP real aterrice, recordará la MAC"* — **ya aterrizó** (`dad711f`). **El invariante que hay que guardar** (el guard de esta unidad se escribió sobre `onChoosePaired`, que es la instancia arreglada, y no sobre esto): *nadie escribe la clave del bastón recordado antes de `'connected'`, y lo que se escribe es una MAC*. Cerrarlo es sacar esa escritura (el adapter ya persiste al conectar) + un guard de fuente que enumere **todas** las escrituras de la clave.
+   - ✅ **CERRADO (2026-08-17, delta `ios-ble-mfi` F4 + su fix-loop).** Las dos mitades: (a) la escritura se **borró** de la pantalla —el único que persiste es el adapter, en el punto donde el bastón contestó, y ahí escribe además su `adapterKind` (RBM5.6)—, y dejó de ser inocuo justo como este ítem anticipaba: con el transporte BLE, `connect()` usa el id recordado **en vez de escanear**, así que un `'esp32-gatt-emu'` guardado ahí manda a `connectToDevice()` contra un id que no existe; (b) el guard ya **no enumera archivos nombrados**: barre el árbol (`app/src` + `app/app`, sin tests) y exige que la lista de módulos que llaman `writeRememberedDevice` sea **cerrada** (el borde + los dos adapters), que cada uno pase **su** `adapterKind`, y que el literal de la clave de storage viva en **un solo** módulo. Un cuarto escritor —o un segundo módulo con la clave hardcodeada— nace en rojo. Está en `app/src/services/ble/wiring.test.ts` (*"los módulos habilitados a ESCRIBIR el bastón recordado son una lista CERRADA"*), falsificado con un mutante que le saca el `adapterKind` al adapter BLE.
 3. **Awaits de primitivas nativas sin techo, pre-existentes** (inventario del guard nuevo). `feedback-pref.ts` (escritura best-effort de una preferencia) y, fuera del territorio de spec 04, `establishment-store.ts`, `last-rodeo.ts`, `lockout-store.ts`, `pending-invitation.ts`, `rodeo-store.ts` — todos `await SecureStore.setItemAsync/deleteItemAsync` sin presupuesto. Ninguno está en un camino donde colgarse deje al operario sin poder hacer algo (eso era el caso del `signOut`, ya cerrado), pero son la misma clase. El mecanismo ya existe y es reusable: `withTimeout(…, DEFAULT_BRIDGE_TIMINGS.storage, '<label>')`, con el techo puesto **en el borde** que hace la llamada nativa y no en cada call site.
 **Por qué importa**: las tres son "el guard cubre la instancia que arreglamos, no el invariante". Es el modo de falla que esta feature repitió cuatro veces.
 

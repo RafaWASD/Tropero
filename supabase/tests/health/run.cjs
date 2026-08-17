@@ -3,6 +3,10 @@
 // Corre contra el proyecto remoto DEV. La EF `health` es PÚBLICA (verify_jwt=false) → se pinguea sin JWT
 // (patrón UptimeRobot). Devuelve un JSON MÍNIMO { ok, schema_version, env } — nada sensible.
 //
+// C4(a) 200 + ok:true + schema_version / C4(b) sin JWT / C4(c) body ⊆ {ok,schema_version,env} (no leak) /
+// C4(d) anon NO puede rpc/health_status directo / C4(e) el VALOR de `env` es un ambiente conocido —
+// agregado 2026-08-17, ver `./env-oracle.cjs`— + C4(e-mutantes), su falsificación offline.
+//
 // ⚠️ GATEADA: requiere que el LEADER haya (1) aplicado 0125_health_status.sql a DEV y (2) deployado la EF
 //    `health` a DEV con `--no-verify-jwt`. Antes del deploy, esta suite FALLA (la EF/RPC no existen) →
 //    mismo patrón que spec 12/14/M6/tratamientos/audit. El hook en scripts/run-tests.mjs va COMENTADO
@@ -14,6 +18,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const {
+  KNOWN_HEALTH_ENVS,
+  UNSET_ENV_SENTINEL,
+  HealthEnvError,
+  assertHealthEnv,
+} = require('./env-oracle.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const envLocalPath = path.join(REPO_ROOT, '.env.local');
@@ -119,5 +129,79 @@ test('Edge Function health (spec 16 Run C)', async (t) => {
       `esperaba 401/403/404 (REVOKE FROM PUBLIC/anon), obtuve ${res.status}`,
     );
     assert.notEqual(res.status, 200, 'anon NO debe poder ejecutar health_status directo (RPC público)');
+  });
+
+  // -------------------------------------------------------------------
+  // C4(e) — R7.2: el VALOR de `env` es un ambiente CONOCIDO, nunca 'unknown'.
+  //
+  // El agujero que cierra: C4(c) valida el juego de CLAVES del body, no sus valores. Con sólo C4(c), el
+  // endpoint de salud puede reportar `env: "unknown"` (= ningún secret de ambiente seteado en el
+  // proyecto, el monitor externo no distingue DEV de PROD) y la suite queda verde. Pasó: en DEV estuvo
+  // así semanas y nadie se enteró.
+  //
+  // El juicio vive en `./env-oracle.cjs` (PURO) para poder ejercerlo contra respuestas fabricadas —ver
+  // C4(e-mutantes) acá abajo—, porque el positivo real de este guard (dessetear el secret) es una acción
+  // externa sobre el proyecto que un test no puede ni debe provocar.
+  // -------------------------------------------------------------------
+  await t.test(`C4(e) R7.2: env es un ambiente conocido (${KNOWN_HEALTH_ENVS.join('|')}), nunca '${UNSET_ENV_SENTINEL}'`, async () => {
+    const res = await fetch(FN_URL, { method: 'GET' });
+    assert.equal(res.status, 200, `esperaba 200, obtuve ${res.status}`);
+    const body = await res.json();
+    assertHealthEnv(body); // tira HealthEnvError con la remediación adentro del mensaje
+  });
+
+  // -------------------------------------------------------------------
+  // C4(e-mutantes) — FALSIFICACIÓN de C4(e), sin red y sin tocar nada externo.
+  //
+  // Ejerce EXACTAMENTE el mismo `assertHealthEnv` que C4(e), cambiando sólo el input: si este bloque
+  // pasa, C4(e) es capaz de fallar. Sin esto, C4(e) sería un assert que nunca vio un positivo (hoy DEV
+  // responde bien, así que el test verde no prueba nada sobre su capacidad de detectar).
+  //
+  // Los rechazos cubren el modo de falla OBSERVADO ('unknown') y sus vecinos de la misma clase, que un
+  // `!== 'unknown'` dejaría pasar: typos, mayúsculas, espacio pegado, el vocabulario de EXPO_PUBLIC_ENV
+  // del cliente y el de `--env` de los scripts.
+  // -------------------------------------------------------------------
+  await t.test('C4(e-mutantes): el oráculo de env RECHAZA lo que tiene que rechazar (falsificación)', () => {
+    const base = { ok: true, schema_version: '0134' };
+    const rechazables = [
+      [UNSET_ENV_SENTINEL, 'ningún secret de ambiente seteado — EL modo de falla observado en DEV'],
+      ['', 'secret seteado en vacío'],
+      [undefined, 'clave env presente pero sin valor'],
+      ['Development', 'mayúscula (el label del monitor no matchea)'],
+      ['developement', 'typo'],
+      ['development ', 'espacio pegado por el shell al setear el secret'],
+      ['preview', 'vocabulario de EXPO_PUBLIC_ENV (canal de build del cliente), no de un proyecto'],
+      ['e2e', 'vocabulario de EXPO_PUBLIC_ENV'],
+      ['dev', 'vocabulario de --env de los scripts (env-target.mjs), no del secret'],
+      ['prod', 'vocabulario de --env de los scripts'],
+      [null, 'valor nulo'],
+      [42, 'valor no-string'],
+    ];
+    for (const [env, porQue] of rechazables) {
+      assert.throws(
+        () => assertHealthEnv({ ...base, env }),
+        HealthEnvError, // que falle POR ESTO, no por un TypeError de paso
+        `el oráculo debería RECHAZAR env=${JSON.stringify(env)} (${porQue}) y lo aceptó`,
+      );
+    }
+    // Body sin la clave `env` (contrato roto / no le estoy pegando a health) también se rechaza.
+    assert.throws(() => assertHealthEnv({ ...base }), HealthEnvError, 'body sin `env` debería rechazarse');
+    assert.throws(() => assertHealthEnv(null), HealthEnvError, 'body no-objeto debería rechazarse');
+
+    // El mensaje del caso 'unknown' tiene que nombrar el secret: un guard que corta sin decir qué tocar
+    // es una trampa (mismo criterio que ProdGuardError en scripts/lib/env-target.mjs).
+    assert.throws(
+      () => assertHealthEnv({ ...base, env: UNSET_ENV_SENTINEL }),
+      /MITROPERO_ENV/,
+      'el mensaje del fallo debería nombrar el secret a setear',
+    );
+
+    // Y ACEPTA todo el dominio legítimo (si esto fallara, C4(e) sería un test que no puede pasar).
+    for (const env of KNOWN_HEALTH_ENVS) {
+      assert.doesNotThrow(
+        () => assertHealthEnv({ ...base, env }),
+        `el oráculo debería ACEPTAR env=${JSON.stringify(env)}`,
+      );
+    }
   });
 });

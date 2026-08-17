@@ -410,12 +410,22 @@ Deno.serve(async (req) => {
   (`MITROPERO_ENV ?? RAFAQ_ENV ?? 'unknown'`); los dos secrets pueden convivir, así que setear el nuevo no
   rompe nada y recién después se saca el fallback (anotado en `docs/backlog.md`). **El código nuevo no
   está deployado**: entra con el próximo deploy de `health`.
-  ⚠️ **Medido** (GET a `/functions/v1/health` de DEV, 2026-08-17): devuelve `env: "unknown"` → en DEV el
-  secret **no está seteado con ninguno de los dos nombres**, al revés de lo que suponía el plan de
-  rebrand. Y la suite `health` **no lo ve**: valida el juego de claves del body (R7.5), nunca el VALOR de
-  `env`. Si algún día se quiere cerrar ese agujero, el oráculo barato es assertar en
-  `supabase/tests/health/run.cjs` que `env ∈ {development, production}` — hoy no está puesto porque exige
-  que el secret exista en DEV.
+  ⚠️ **Medido** (GET a `/functions/v1/health` de DEV, 2026-08-17): devolvía `env: "unknown"` → en DEV el
+  secret **no estaba seteado con ninguno de los dos nombres**, al revés de lo que suponía el plan de
+  rebrand. Y la suite `health` **no lo veía**: validaba el juego de claves del body (R7.5), nunca el VALOR
+  de `env`.
+  **As-built 2026-08-17**: el secret se seteó (`MITROPERO_ENV=development` en DEV) + redeploy → hoy
+  responde `env: "development"`, y el agujero de observabilidad está cerrado con `C4(e)` en
+  `supabase/tests/health/run.cjs`: `env` debe pertenecer a un **conjunto cerrado** `{development,
+  production}` (nunca `unknown`). El dominio vive en `supabase/tests/health/env-oracle.cjs`
+  (`KNOWN_HEALTH_ENVS`, PURO) — fuente única, y un ambiente nuevo legítimo nace en rojo con el mensaje que
+  dice qué tocar. Se eligió conjunto cerrado sobre `!== 'unknown'` porque los vecinos del modo de falla
+  observado (typo, mayúscula, espacio pegado, el vocabulario `preview`/`e2e` de `EXPO_PUBLIC_ENV`, el
+  `dev`/`prod` de `--env`) son igual de silenciosos y dejan al monitor con un label que no mapea a ningún
+  proyecto. Falsificado offline con `C4(e-mutantes)` (bodies fabricados contra el mismo `assertHealthEnv`)
+  — dessetear el secret para ver el positivo real habría sido una acción externa sobre DEV.
+  **Residual conocido**: C4(e) valida pertenencia al dominio, NO que el ambiente reportado corresponda al
+  proyecto al que se le pega (un DEV etiquetado `production` pasaría). Anotado en `docs/backlog.md`.
 - **Privacidad (R7.5/L1)**: la respuesta es exactamente `{ok, schema_version, env}`, con `schema_version`
   = **prefijo numérico de 4 dígitos** (no el filename). Ningún conteo de filas, ningún nombre de tabla de
   negocio, ninguna PII. Gate 1 valida esta superficie pública.

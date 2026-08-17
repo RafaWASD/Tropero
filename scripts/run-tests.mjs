@@ -309,7 +309,13 @@ if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
   // spec 16 Run C (Edge Function `health`) — endpoint público (verify_jwt=false) que invoca la RPC
   // public.health_status() (SECURITY DEFINER, 0125) y devuelve {ok, schema_version, env}. La suite cubre
   // C4(a) 200+ok:true+schema_version prefijo 4 dígitos / C4(b) invocable sin JWT / C4(c) body ⊆
-  // {ok,schema_version,env} (no leak) / C4(d) anon NO puede rpc/health_status directo (REVOKE FROM PUBLIC, M1).
+  // {ok,schema_version,env} (no leak) / C4(d) anon NO puede rpc/health_status directo (REVOKE FROM PUBLIC, M1)
+  // / C4(e) el VALOR de `env` pertenece al dominio conocido, nunca 'unknown'.
+  // ⚠️ C4(e) se agregó el 2026-08-17 y cierra un agujero que costó semanas de señal muda: hasta ese día
+  //    el secret de ambiente NUNCA estuvo seteado en DEV y el endpoint venía diciendo `env:"unknown"`.
+  //    C4(c) —que mira el JUEGO DE CLAVES— pasaba en verde con ese mismo body: está verificado corriendo
+  //    la suite contra una respuesta stubeada. Un endpoint de salud que reporta mal el ambiente no se
+  //    detecta mirando la FORMA del body; hay que mirar el VALOR.
   // ⚠️ DESCOMENTAR cuando el LEADER aplique 0125_health_status.sql a DEV + deploye la EF `health` a DEV
   //    (`supabase functions deploy health --no-verify-jwt`). Antes del deploy, esta suite FALLA (la EF/RPC no
   //    existen) → mismo patrón que spec 12/14/M6/tratamientos/audit. Detalle en progress/impl_16-runC.md.
