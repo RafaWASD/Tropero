@@ -103,11 +103,14 @@
 #define EMU_GATT_CHUNK 20
 #endif
 
-// HID: modo de autenticación BLE. SC_MITM_BOND + IO_CAP_NONE = bonding "just works", que es lo que
-// hacen los teclados BLE caseros y lo que iOS acepta para un teclado. Si iOS se negara a emparejar,
-// probá EMU_HID_AUTH=ESP_LE_AUTH_REQ_SC_BOND (sin MITM).
+// HID: modo de autenticación BLE. Con IO_CAP_NONE (no hay display ni teclado en el ESP32) la única
+// asociación posible es "just works", que por definición NO puede satisfacer MITM. Pedir MITM es
+// pedir algo que no podemos dar: la librería lo traduce a ESP_BLE_SEC_ENCRYPT_MITM
+// (BLESecurity.cpp:247-253), que exige una LTK autenticada, y un host estricto puede rechazar el
+// pairing con "Authentication Requirements" (Core spec Vol 3 Part H §2.3.5.1). Por eso el default es
+// SC_BOND: bonding + LE Secure Connections, sin MITM. Los bits se descomponen en txBegin().
 #ifndef EMU_HID_AUTH
-#define EMU_HID_AUTH ESP_LE_AUTH_REQ_SC_MITM_BOND
+#define EMU_HID_AUTH ESP_LE_AUTH_REQ_SC_BOND
 #endif
 #define EMU_HID_DEFAULT_KEY_DELAY_MS 12  // un wedge real teclea a ~10-20 ms por carácter
 
@@ -561,6 +564,12 @@ static BLECharacteristic *g_input = nullptr;
 static volatile bool g_bleLinked = false;
 static bool g_bleAdvertising = false;  // ¿QUEREMOS estar en el aire? (lo baja `off`, no una desconexión)
 static volatile bool g_bleReAdvertise = false;  // pedido de re-anuncio dejado por el callback del stack
+// Estado de SEGURIDAD del link. "Conectado" no alcanza para tipear: un host HID sólo acepta reportes
+// sobre un link cifrado, y el cifrado sale del pairing. Sin esto el emulador decía "lectura →" con el
+// iPhone conectado y sin emparejar, que es exactamente cómo se falsea un gate.
+static volatile bool g_bleEncrypted = false;   // hubo ESP_GAP_BLE_AUTH_CMPL_EVT con success
+static volatile bool g_bleAuthFailed = false;  // el último intento de emparejar falló
+static volatile uint8_t g_bleAuthMode = 0;     // auth_mode negociado (bit0 bond, bit2 MITM, bit3 SC)
 static uint32_t g_hidKeyDelayMs = EMU_HID_DEFAULT_KEY_DELAY_MS;
 static bool g_hidRaw = false;  // tipear la trama completa en vez de solo el EID
 // Terminador TECLEADO: '\n' = Enter, '\t' = Tab, 0 = ninguno. No es un EmuTerm: un teclado no
@@ -592,10 +601,15 @@ static const uint8_t HID_REPORT_MAP[] = {
 class HidServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
     g_bleLinked = true;
+    // El cifrado se re-negocia en CADA conexión (con la LTK guardada si hay bond). Hasta que llegue
+    // el AUTH_CMPL, este link NO está cifrado: darlo por bueno sería heredar el estado del anterior.
+    g_bleEncrypted = false;
+    g_bleAuthFailed = false;
     logLine("HID: central CONECTADO");
   }
   void onDisconnect(BLEServer *) override {
     g_bleLinked = false;
+    g_bleEncrypted = false;
     g_bleReAdvertise = true;  // el re-anuncio lo hace txPoll(), NO este callback (ver abajo)
     logLine("HID: central DESCONECTADO");
   }
@@ -609,10 +623,227 @@ static const char *txDeviceName() {
   return g_btName;
 }
 
+/** Formatea los 6 bytes de un esp_bd_addr_t. Recibe `const uint8_t *` a propósito: ver §1. */
+static void hidFormatAddr(char *out, size_t n, const uint8_t *bda) {
+  snprintf(out, n, "%02X:%02X:%02X:%02X:%02X:%02X", bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+}
+
+/**
+ * Traduce el `fail_reason` de un pairing fallido.
+ *
+ * Los números crudos no sirven para atribuir un fallo: "0x66" no dice nada, `CONN_TOUT` dice que el
+ * link se cortó a mitad del SMP y `PAIR_AUTH_FAIL` diría que el host rechazó nuestros requisitos de
+ * autenticación (o sea: hay que tocar EMU_HID_AUTH). Los valores salen del `esp_ble_auth_fail_rsn_t`
+ * del core instalado (esp_gap_ble_api.h:727-757), que arranca en 78 = las razones del Core Spec 5.0
+ * Vol 3 Part H §3.5.5 y sigue con las internas de Bluedroid.
+ */
+static const char *hidAuthFailName(unsigned r) {
+  switch (r) {
+    case 78: return "SMP_PASSKEY_FAIL";
+    case 79: return "SMP_OOB_FAIL";
+    case 80: return "SMP_PAIR_AUTH_FAIL (el host rechazó nuestros requisitos de autenticación)";
+    case 81: return "SMP_CONFIRM_VALUE_FAIL";
+    case 82: return "SMP_PAIR_NOT_SUPPORT";
+    case 83: return "SMP_ENC_KEY_SIZE";
+    case 84: return "SMP_INVALID_CMD";
+    case 85: return "SMP_UNKNOWN_ERR";
+    case 86: return "SMP_REPEATED_ATTEMPT";
+    case 87: return "SMP_INVALID_PARAMETERS";
+    case 88: return "SMP_DHKEY_CHK_FAIL";
+    case 89: return "SMP_NUM_COMP_FAIL";
+    case 90: return "SMP_BR_PARING_IN_PROGR";
+    case 91: return "SMP_XTRANS_DERIVE_NOT_ALLOW";
+    case 92: return "SMP_INTERNAL_ERR";
+    case 93: return "SMP_UNKNOWN_IO";
+    case 94: return "SMP_INIT_FAIL";
+    case 95: return "SMP_CONFIRM_FAIL";
+    case 96: return "SMP_BUSY";
+    case 97: return "SMP_ENC_FAIL";
+    case 98: return "SMP_STARTED";
+    case 99: return "SMP_RSP_TIMEOUT (el host nunca contestó el SMP)";
+    case 100: return "SMP_DIV_NOT_AVAIL";
+    case 101: return "SMP_UNSPEC_ERR";
+    case 102: return "SMP_CONN_TOUT (se cortó el link a mitad del emparejamiento)";
+    default: return "desconocido";
+  }
+}
+
+/**
+ * Resultado del emparejamiento, dicho en voz alta.
+ *
+ * Sin esto, un pairing que falla y un pairing que nunca se intenta se ven IGUAL desde la consola
+ * (link=CONECTADO en los dos), y esa ambigüedad ya costó una sesión de gate: el emulador informaba
+ * `lecturas=1` con el iPhone conectado y sin emparejar. `bond=NO` en el auth_mode es la diferencia
+ * entre "emparejó" y "emparejó y va a seguir emparejado después de apagar el Bluetooth".
+ */
+static void hidLogAuthComplete(bool ok, uint8_t authMode, unsigned failReason, const uint8_t *bda) {
+  char addr[20];
+  hidFormatAddr(addr, sizeof(addr), bda);
+  char msg[224];
+  if (ok) {
+    g_bleAuthMode = authMode;
+    g_bleAuthFailed = false;
+    g_bleEncrypted = true;
+    snprintf(msg, sizeof(msg), "HID: EMPAREJADO con %s — link CIFRADO (auth_mode=0x%02X bond=%s sc=%s mitm=%s)",
+             addr, (unsigned)authMode, (authMode & ESP_LE_AUTH_BOND) ? "SI" : "NO",
+             (authMode & ESP_LE_AUTH_REQ_SC_ONLY) ? "si" : "no", (authMode & ESP_LE_AUTH_REQ_MITM) ? "si" : "no");
+  } else {
+    g_bleAuthFailed = true;
+    g_bleEncrypted = false;
+    snprintf(msg, sizeof(msg), "HID: el emparejamiento con %s FALLÓ: %s (0x%02X) — sin bond y sin cifrado, no se tipea nada",
+             addr, hidAuthFailName(failReason), failReason);
+  }
+  logLine(msg);
+}
+
+/**
+ * ¿El host suscribió el input report (CCCD 0x2902)?
+ *
+ * `BLECharacteristic::notify()` descarta EN SILENCIO si el CCCD está apagado
+ * (BLECharacteristic.cpp:861-867) y no devuelve nada. Sin este chequeo el emulador contaba como
+ * tipeada una tecla que nunca salió del ESP32.
+ */
+static bool hidSubscribed() {
+  // Sin link no hay suscripción: el valor del CCCD queda escrito de la conexión anterior (la librería
+  // lo persiste para los bonded, BLEDevice.cpp:1399-1403) y reportarlo con el link caído sería mentir.
+  if (!g_bleLinked || g_input == nullptr) return false;
+  BLE2902 *cccd = (BLE2902 *)g_input->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
+  return cccd != nullptr && cccd->getNotifications();
+}
+
+/**
+ * Bonds guardados en NVS (CONFIG_BT_BLE_SMP_BOND_NVS_FLASH=y en el sdkconfig del core).
+ *
+ * Es EL oráculo local de "el bond persiste", y el único que no depende de la UI de otro sistema
+ * operativo: si después de un `reboot` el peer sigue listado acá, la LTK se guardó de verdad.
+ */
+static void hidPrintBonds(Print &out) {
+  const int n = esp_ble_get_bond_device_num();
+  out.print("[emu] bonds guardados en NVS: ");
+  out.println(n);
+  if (n <= 0) return;
+  esp_ble_bond_dev_t *list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * (size_t)n);
+  if (list == nullptr) {
+    out.println("[emu] ERR: sin heap para listar los bonds");
+    return;
+  }
+  int got = n;
+  if (esp_ble_get_bond_device_list(&got, list) == ESP_OK) {
+    if (got > n) got = n;  // el buffer tiene n: un bond nuevo entre las dos llamadas no lo desborda
+    for (int i = 0; i < got; i++) {
+      char addr[20];
+      hidFormatAddr(addr, sizeof(addr), list[i].bd_addr);
+      // key_mask: bit0 PENC (LTK del peer), bit1 PID (IRK del peer) — sin PENC no hay reconexión
+      // cifrada, sin PID no se resuelve la dirección privada aleatoria del iPhone.
+      char msg[96];
+      snprintf(msg, sizeof(msg), "  %s  claves=0x%02X (LTK=%s IRK=%s)", addr, (unsigned)list[i].bond_key.key_mask,
+               (list[i].bond_key.key_mask & ESP_LE_KEY_PENC) ? "si" : "NO",
+               (list[i].bond_key.key_mask & ESP_LE_KEY_PID) ? "si" : "no");
+      out.print("[emu]");
+      out.println(msg);
+    }
+  } else {
+    out.println("[emu] ERR: esp_ble_get_bond_device_list falló");
+  }
+  free(list);
+}
+
+/**
+ * Borra TODOS los bonds del emulador.
+ *
+ * El gate del iPhone tiene que arrancar desde cero: un bond viejo (de la PC, de un intento anterior)
+ * hace que el emulador se re-cifre con una LTK guardada y enmascara si el pairing nuevo funciona.
+ */
+static void hidClearBonds(Print &out) {
+  const int n = esp_ble_get_bond_device_num();
+  if (n <= 0) {
+    out.println("[emu] no había bonds que borrar");
+    return;
+  }
+  esp_ble_bond_dev_t *list = (esp_ble_bond_dev_t *)malloc(sizeof(esp_ble_bond_dev_t) * (size_t)n);
+  if (list == nullptr) {
+    out.println("[emu] ERR: sin heap para borrar los bonds");
+    return;
+  }
+  int got = n;
+  int borrados = 0;
+  if (esp_ble_get_bond_device_list(&got, list) == ESP_OK) {
+    if (got > n) got = n;
+    for (int i = 0; i < got; i++) {
+      if (esp_ble_remove_bond_device(list[i].bd_addr) == ESP_OK) borrados++;
+    }
+  }
+  free(list);
+  // `esp_ble_remove_bond_device` es ASINCRÓNICO (va por la cola del BTC): listar en la línea de abajo
+  // devolvía el conteo viejo y parecía que el borrado no había funcionado. Se espera a que baje.
+  for (int espera = 0; espera < 20 && esp_ble_get_bond_device_num() > 0; espera++) delay(50);
+  // El auth_mode que muestra `status` es el del último emparejamiento: dejarlo puesto con bonds=0
+  // sería decir "autenticado" sobre un emulador que ya no tiene con qué.
+  g_bleAuthMode = 0;
+  g_bleAuthFailed = false;
+  char msg[96];
+  snprintf(msg, sizeof(msg), "bonds borrados: %d de %d (quedan %d)", borrados, n, esp_ble_get_bond_device_num());
+  logLine(msg);
+  // Si el host todavía tiene SU lado del emparejamiento, va a reconectar en loop e intentar cifrar
+  // con una LTK que acá ya no existe. Borrar de los dos lados o el aire queda inutilizable.
+  logLine("OJO: si el host sigue emparejado, se va a reconectar en loop — borralo también de su lado");
+}
+
 static void txBegin() {
   BLEDevice::init(g_btName);
-  BLESecurity::setAuthenticationMode((uint8_t)EMU_HID_AUTH);
+
+  // Instrumentación del emparejamiento. Va como lambda SIN captura (se convierte sola al puntero de
+  // función que pide `setCustomGapHandler`) y no como función suelta A PROPÓSITO: una función del
+  // .ino con `esp_gap_ble_cb_event_t` en la firma se rompe con el generador de prototipos de Arduino
+  // (misma trampa que documenta la §1 para `HidKey`). El cuerpo sólo LOGUEA: no se reentra al stack
+  // BLE desde su propio callback (misma razón que el `queueAirCommand` del MODO_GATT).
+  BLEDevice::setCustomGapHandler([](esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
+    switch (event) {
+      case ESP_GAP_BLE_SEC_REQ_EVT: logLine("HID: el host pidió seguridad (la librería la acepta sola)"); break;
+      case ESP_GAP_BLE_KEY_EVT: {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "HID: clave intercambiada (tipo 0x%02X)", (unsigned)param->ble_security.ble_key.key_type);
+        logLine(msg);
+        break;
+      }
+      case ESP_GAP_BLE_AUTH_CMPL_EVT:
+        hidLogAuthComplete(param->ble_security.auth_cmpl.success, (uint8_t)param->ble_security.auth_cmpl.auth_mode,
+                           (unsigned)param->ble_security.auth_cmpl.fail_reason, param->ble_security.auth_cmpl.bd_addr);
+        break;
+      default: break;
+    }
+  });
+
+  // ⚠️ TRAMPA de BLESecurity (core esp32 3.3.8): hay DOS `setAuthenticationMode` y NO son
+  // equivalentes. El de `uint8_t` (BLESecurity.cpp:105-115) SOLO empuja el authReq al GAP. El de
+  // 3 `bool` (:239-258) es el único que además prende `m_securityEnabled` y fija `m_securityLevel`
+  // (vía setEncryptionLevel). Y `m_securityEnabled` es lo que gatea que el periférico ARRANQUE la
+  // seguridad al conectarse: BLEDevice.cpp:1219-1225 (ESP_GATTS_CONNECT_EVT → startSecurity) sólo
+  // llama a `esp_ble_set_encryption` si está en true. Con la sobrecarga de `uint8_t` quedaba en
+  // false → el emulador NUNCA mandaba el Security Request, el host se conectaba y enumeraba sin
+  // emparejar, y como el HID de esta librería deja el CCCD y el Report Map sin cifrado
+  // (BLEHIDDevice.cpp:162-193, "removed per HOGP specification"), tampoco había un error de
+  // "insufficient authentication" que empujara al host a emparejar por su cuenta. Resultado
+  // medido: conecta, no queda bond, y no se tipea una sola tecla.
+  // Además `m_securityLevel` es un static sin inicializador (BLESecurity.cpp:87) → 0, que NO es un
+  // `esp_ble_sec_act_t` válido (ESP_BLE_SEC_ENCRYPT == 1). El de 3 bool también lo arregla.
+  // Ver progress/impl_emulador-hid-bonding.md.
   BLESecurity::setCapability(ESP_IO_CAP_NONE);  // sin display ni teclado → "just works"
+  BLESecurity::setAuthenticationMode(
+      (((uint8_t)EMU_HID_AUTH) & ESP_LE_AUTH_BOND) != 0,        // bonding
+      (((uint8_t)EMU_HID_AUTH) & ESP_LE_AUTH_REQ_MITM) != 0,    // MITM
+      (((uint8_t)EMU_HID_AUTH) & ESP_LE_AUTH_REQ_SC_ONLY) != 0  // LE Secure Connections
+  );
+  // ⚠️ Segunda trampa de la misma clase: las máscaras de distribución de claves y el tamaño de clave
+  // los fija el CONSTRUCTOR de BLESecurity (BLESecurity.cpp:96-101), y acá no corre ninguno porque
+  // usamos la API estática. Los estáticos arrancan en `m_initKey = m_respKey = 0` (:76-77), así que
+  // esos parámetros del GAP quedaban en lo que trajera Bluedroid de fábrica, sin que el sketch lo
+  // declarara. Se declaran: ENC (LTK, para poder re-cifrar en la reconexión) + ID (IRK, para
+  // resolver la dirección privada aleatoria del iPhone, que rota).
+  BLESecurity::setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  BLESecurity::setKeySize(16);
+
   g_server = BLEDevice::createServer();
   g_server->setCallbacks(&g_hidCallbacks);
   g_server->advertiseOnDisconnect(false);  // el re-anuncio lo manejamos nosotros (comando `off`)
@@ -715,6 +946,17 @@ static void hidPressRelease(const HidKey &k) {
 /** "Escribe" tipeando. Colapsa `\r\n` en un solo Enter y descarta lo no tipeable, avisando. */
 static size_t txSendRaw(const uint8_t *data, size_t len) {
   if (!txLinked()) return 0;
+  // Un central conectado NO es un teclado del otro lado. Si el host no suscribió el input report,
+  // `notify()` tira el reporte en silencio y el emulador estaría contando teclas que nunca salieron.
+  if (!hidSubscribed()) {
+    logLine("HID: el host NO suscribió el input report — conectado pero sin teclado del otro lado");
+    return 0;
+  }
+  // Sin cifrado no hubo pairing, y un host HID real ignora reportes sobre un link en claro. Se avisa
+  // y se manda igual: el emulador no decide por el host, pero deja de mentir sobre lo que pasó.
+  if (!g_bleEncrypted) {
+    logLine("HID: OJO, el link NO está cifrado (no hubo emparejamiento) — un host HID real descarta estos reportes");
+  }
   size_t typed = 0, skipped = 0;
   bool lastWasEnter = false;
   for (size_t i = 0; i < len; i++) {
@@ -1069,6 +1311,8 @@ static void printHelp(Print &out) {
 #endif
 #if EMU_MODE == MODO_HID
   out.println("  hidterm enter|tab|none | hiddelay <ms> | hidraw on|off");
+  out.println("  bonds                lista los emparejamientos guardados (sobreviven al reboot)");
+  out.println("  unbond               borra TODOS los bonds (dejar limpio antes de un gate)");
 #endif
   out.println("  boton BOOT: corto = 1 lectura | largo = off 5000");
 }
@@ -1120,6 +1364,17 @@ static void printStatus(Print &out) {
 #endif
   out.print(" heap=");
   out.println(ESP.getFreeHeap());
+#if EMU_MODE == MODO_HID
+  // La línea que faltaba: sin ella, "conectado sin emparejar" y "conectado y tipeando" se ven igual.
+  out.print("[emu] cifrado=");
+  out.print(g_bleEncrypted ? "SI" : (g_bleAuthFailed ? "NO (el pairing falló)" : "no"));
+  out.print(" cccd=");
+  out.print(hidSubscribed() ? "suscripto" : "apagado");
+  out.print(" auth_mode=0x");
+  out.print(g_bleAuthMode, HEX);
+  out.print(" bonds=");
+  out.println(esp_ble_get_bond_device_num());
+#endif
 }
 
 /**
@@ -1361,9 +1616,14 @@ static void handleCommandLine(char *line, Print &out) {
   } else if (strcmp(cmd, "hidraw") == 0) {
     g_hidRaw = isOn(a1);
     printStatus(out);
+  } else if (strcmp(cmd, "bonds") == 0) {
+    hidPrintBonds(out);
+  } else if (strcmp(cmd, "unbond") == 0) {
+    hidClearBonds(out);
+    hidPrintBonds(out);
 #endif
   } else if (strcmp(cmd, "chunk") == 0 || strcmp(cmd, "hidterm") == 0 || strcmp(cmd, "hiddelay") == 0 ||
-             strcmp(cmd, "hidraw") == 0) {
+             strcmp(cmd, "hidraw") == 0 || strcmp(cmd, "bonds") == 0 || strcmp(cmd, "unbond") == 0) {
     // El comando existe pero es de otro modo: se dice, no se ignora en silencio.
     logLine("ERR: ese comando no aplica al modo compilado");
   } else {

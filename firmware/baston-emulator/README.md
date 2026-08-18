@@ -52,15 +52,17 @@ este banco.
 | modo | ¿corrió en hardware? | qué se midió, y cuándo |
 |---|---|---|
 | `MODO_SPP` | ✅ **sí**, desde 2026-07-29 | el banco entero contra el teléfono (`bench/run-bench.py`, resultados en `progress/bench_baston-spp-emulador.md`) |
-| `MODO_HID` | ✅ **desde 2026-08-16** (antes: boot loop) | arranca sin loop; `status` / `selftest` / `help`; los knobs `hidterm` · `hiddelay` · `hidraw`; `read`, `drop`, `off`; y **se lo ve en el aire como `EMU-HID-380` anunciando el servicio HID `0x1812`** (escaneo BLE desde la PC) |
+| `MODO_HID` | ✅ **desde 2026-08-16**, y **empareja y TIPEA desde 2026-08-17** (antes: boot loop, y después bonding roto) | arranca sin loop; `status` / `selftest` / `help`; los knobs `hidterm` · `hiddelay` · `hidraw`; `read`, `drop`, `off`; se lo ve en el aire anunciando el servicio HID `0x1812`; **empareja con Windows** (`auth_mode=0x09`, bond + Secure Connections, LTK e IRK intercambiadas), Windows le carga el driver HOGP y lo lista como *Dispositivo de teclado HID*, **el bond persiste** al reboot del ESP32 y a un ciclo de la radio Bluetooth de Windows, y **tipea los 15 dígitos + Enter/Tab en una ventana de texto real**. Evidencia: `progress/impl_emulador-hid-bonding.md` |
 | `MODO_GATT` | ✅ **desde 2026-08-16** (antes: nunca ejecutado) | arranca; anuncia `EMU-GATT-STICK`; acepta la conexión de un central; **notifica la trama partida en 20 + 17 bytes** (el chunking que tiene que reensamblar `LineFramer`); y se re-anuncia al desconectarse |
 
 **Lo que sigue sin verificarse en hardware**, y por qué no se puede desde acá:
 
-- **`MODO_HID` — el emparejamiento y el tecleo.** Que tipee los 15 dígitos dentro de un `TextInput`
-  necesita un host emparejado: **eso es el gate**, y lo corre Raf con el iPhone
-  (`progress/gate_hid-runbook.md`). Adrede **no** se emparejó desde la PC: un bond de Windows deja al
-  emulador reconectándose solo con la PC y le puede robar la conexión al iPhone en plena medición.
+- **`MODO_HID` con iOS.** Lo medido es contra **Windows**, que es el host más cercano que hay en la
+  mesa. Que iOS acepte el mismo emparejamiento y entregue las teclas a un `TextInput` **es el gate** y
+  lo corre Raf con el iPhone (`progress/gate_hid-runbook.md`). Lo que sí está cerrado es que el
+  emulador **es** un teclado BLE que empareja, bondea y tipea: si el iPhone falla, el fallo es de iOS
+  o de la app, no del banco. Ojo: al terminar de medir se **desemparejó de Windows y se borró el bond
+  del ESP32** (`unbond`) — si Windows se queda con el device, le roba la conexión al iPhone.
 - **`MODO_GATT` — el consumo desde la app.** `adapter-ble-gatt` todavía no existe (T-MV.6.3): lo
   verificado es el lado del emulador, no el nuestro.
 - **La coexistencia de los tres stacks en un binario** (ver la sonda más abajo): se midió el tamaño,
@@ -162,12 +164,12 @@ procedimiento de restauración con su SHA-256.
 
 | build | flash | % de 1.310.720 | globals |
 |---|---|---|---|
-| `MODO_SPP` | 1.071.288 B | 81 % | 42.016 B |
-| `MODO_HID` | 1.113.211 B | 84 % | 41.472 B |
-| `MODO_GATT` | 1.110.683 B | 84 % | 41.536 B |
+| `MODO_SPP` | 1.071.320 B | 81 % | 42.016 B |
+| `MODO_HID` | 1.117.663 B | 85 % | 41.480 B |
+| `MODO_GATT` | 1.110.727 B | 84 % | 41.536 B |
 | sonda con los TRES stacks linkeados | 1.113.523 B | 84 % | 42.360 B |
 
-Los tres primeros re-medidos el **2026-08-16** con los fixes del HID adentro; la sonda es del
+Los tres primeros re-medidos el **2026-08-17** con el fix de bonding adentro; la sonda es del
 2026-07-29 y **no** se volvió a medir (es un sketch aparte).
 
 **Los tres entran en un solo binario y en la partición por defecto — el supuesto de que no entraban es
@@ -200,7 +202,7 @@ el device. Todo lo que imprime el emulador va con prefijo `[emu]`.
 | comando | qué hace |
 |---|---|
 | `help` · `?` | lista de comandos |
-| `status` · `st` | modo, nombre, link, EID, formato, reloj, heap libre, y `lecturas=` — que cuenta lo que **salió de verdad**, no lo que se intentó, para poder compararlo directo contra lo que la app ingirió |
+| `status` · `st` | modo, nombre, link, EID, formato, reloj, heap libre, y `lecturas=` — que cuenta lo que **salió de verdad**, no lo que se intentó, para poder compararlo directo contra lo que la app ingirió. En `MODO_HID` agrega una segunda línea: `cifrado=` (¿hubo emparejamiento?), `cccd=` (¿el host suscribió el input report, o sea hay un teclado del otro lado?), `auth_mode=` y `bonds=` |
 | `selftest` | imprime **todas** las variantes de trama con los no-imprimibles escapados, sin necesidad de teléfono ni conexión. Es la verificación de mesa del generador contra la captura de campo |
 | `read [n] [ms]` | `n` lecturas (default 1) separadas `ms` (default `gap`) |
 | `same [n] [ms]` | `n` lecturas del **MISMO** EID (default 3, separadas `gap`) → ejercita el dedup por ventana |
@@ -223,6 +225,8 @@ el device. Todo lo que imprime el emulador va con prefijo `[emu]`.
 | `reboot` | reinicia |
 | `chunk <n>` | *(solo `MODO_GATT`)* bytes por notificación; `0` = una sola |
 | `hidterm enter\|tab\|none` · `hiddelay <ms>` · `hidraw on\|off` | *(solo `MODO_HID`)* terminador tecleado, demora entre teclas (default 12 ms, como un wedge real), y tipear la trama completa en vez de solo el EID |
+| `bonds` | *(solo `MODO_HID`)* lista los emparejamientos guardados en NVS con sus claves (`LTK`/`IRK`). Es **el** oráculo de "el bond persiste" y el único que no depende de la UI de otro sistema operativo: si después de un `reboot` el peer sigue listado, la LTK se guardó de verdad |
+| `unbond` | *(solo `MODO_HID`)* borra **todos** los bonds. Dejar el emulador virgen antes de un gate, si no se re-cifra con una LTK vieja y enmascara si el emparejamiento nuevo funciona. ⚠️ Borrar de **los dos lados**: si el host se queda con su mitad, reconecta en loop intentando cifrar con una clave que acá ya no existe (medido) |
 
 Un comando de otro modo contesta `ERR: ese comando no aplica al modo compilado` — no se ignora en
 silencio.
@@ -339,6 +343,21 @@ T-MV.5.6 / T-MV.5.7 y en `context-multivendor.md`.
   `Server_Gamepad` de la propia librería. Si algún día se agregan más características opcionales del
   HID (`outputReport`, `bootInput`, …), **leer el `.cpp` instalado antes**: la mitad de esta clase son
   getters que crean.
+- **`BLESecurity` tiene DOS `setAuthenticationMode` y sólo uno prende la seguridad.** El de `uint8_t`
+  (`BLESecurity.cpp:105-115`) sólo empuja el `authReq` al GAP; el de 3 `bool` (`:239-258`) es el único
+  que además pone `m_securityEnabled = true` y fija el `m_securityLevel`. Y `m_securityEnabled` es lo
+  que gatea que el periférico **arranque** la seguridad al conectarse (`BLEDevice.cpp:1219-1225`). Con
+  la sobrecarga de `uint8_t` el emulador nunca mandaba el *Security Request*: el host se conectaba,
+  enumeraba, **no emparejaba** y no recibía una sola tecla — y no había ningún error a la vista, porque
+  este `BLEHIDDevice` deja el CCCD y el Report Map **sin cifrado** ("removed per HOGP specification",
+  `BLEHIDDevice.cpp:162-193`), así que tampoco había un *insufficient authentication* que empujara al
+  host a emparejar por su cuenta. Lo mismo vale para `setInitEncryptionKey` / `setRespEncryptionKey` /
+  `setKeySize`: los llama el **constructor** de `BLESecurity` (`:96-101`), que no corre si usás la API
+  estática. Historia y medición: `progress/impl_emulador-hid-bonding.md`.
+- **Un central conectado NO es un teclado del otro lado.** `notify()` descarta en silencio si el CCCD
+  está apagado (`BLECharacteristic.cpp:861-867`) y no devuelve nada: el emulador contaba como tipeadas
+  teclas que nunca salieron del ESP32 (`lecturas=1` con el iPhone conectado y sin emparejar — así se
+  falsea un gate). Hoy `txSendRaw` chequea la suscripción y el cifrado antes de contar.
 - **En BLE, desconectarse ≠ seguir visible.** El stack corta el advertising cuando entra un central y
   `advertiseOnDisconnect(false)` (que usan `MODO_HID` y `MODO_GATT` para que `off` mande) no lo
   reanuda. El re-anuncio lo hace `txPoll()` desde el `loop()` —nunca desde el callback del stack— y
