@@ -1170,7 +1170,22 @@ test('RBM5.13: un device que anuncia el MISMO servicio pero NO lo reconoce el dr
   });
   assert.equal(m.state.connectCalls.length, 0, 'no es un bastón: no se conecta');
   assert.equal(seen.statuses.at(-1), 'disconnected');
-  assert.ok(logs.some((l) => l.includes('ble_device_not_recognized')));
+  const noReconocido = logs.find((l) => l.includes('ble_device_not_recognized'));
+  assert.ok(noReconocido, 'el device que anuncia el servicio y no matchea tiene que dejar rastro');
+  assert.match(
+    noReconocido,
+    /ble_device_not_recognized: #1 del escaneo/,
+    'el ordinal dentro del escaneo es lo que hace legible "vi N cosas y ninguna era un bastón"',
+  );
+  // MEDIUM-2 del Gate 2: el IDENTIFICADOR del dispositivo ajeno NO sale en ningún log. En Android es la
+  // MAC, el dispositivo es de un TERCERO (acá el bridge de la balanza; en el campo, lo que haya cerca) y
+  // el destino de estos eventos es un breadcrumb de Sentry, donde el scrubber de `redact.ts` es key-based
+  // y no puede alcanzar un valor interpolado dentro de una oración.
+  assert.equal(
+    logs.some((l) => l.includes(OTHER_ID)),
+    false,
+    'el id del dispositivo ajeno no puede salir a la telemetría (iba interpolado en el `message`)',
+  );
   const timeout = logs.find((l) => l.includes('ble_scan_timeout'));
   assert.match(
     timeout as string,
@@ -1247,7 +1262,17 @@ test('el escaneo NO se auto-sella: el filtro NUESTRO no cuenta como "lo que el d
   });
   assert.equal(m.state.connectCalls.length, 0, 'un device sin nombre y sin UUID anunciado NO es un bastón');
   assert.equal(seen.statuses.at(-1), 'disconnected');
-  assert.ok(logs.some((l) => l.includes('ble_device_not_recognized') && l.includes(OTHER_ID)));
+  const noReconocido = logs.find((l) => l.includes('ble_device_not_recognized'));
+  assert.ok(noReconocido, 'un device sin nombre y sin UUID anunciado deja rastro de que apareció');
+  assert.match(noReconocido, /ble_device_not_recognized: #1 del escaneo/, 'fue el primero de este escaneo');
+  // MEDIUM-2 del Gate 2: esta aserción antes exigía LO CONTRARIO (`l.includes(OTHER_ID)`), o sea que el
+  // identificador del dispositivo ajeno estuviera en el log. Ahora exige que NO esté: el ordinal alcanza
+  // para el diagnóstico y la MAC de un tercero no tiene por qué viajar a un vendor de telemetría.
+  assert.equal(
+    logs.some((l) => l.includes(OTHER_ID)),
+    false,
+    'ningún log puede llevar el identificador del dispositivo que no reconocimos',
+  );
 });
 
 test('RBM2.5: `startDeviceScan` que RECHAZA corta el escaneo enseguida (no espera el presupuesto)', async () => {
@@ -1399,6 +1424,34 @@ test('R10.5: `disable()` corta la ESCUCHA sin desconectar; `enable()` la reanuda
   adapter.enable();
   d.notify(`${RAW_FRAME}\n`);
   assert.equal(seen.tags.length, 1);
+});
+
+test('RBM2.19: un chorro sostenido SIN fin de trama se descarta con log y el transporte SIGUE leyendo', async () => {
+  // HIGH-1 del Gate 2, del lado del transporte. `line-framer.test.ts` prueba el TOPE; esto prueba que el
+  // adapter lo tiene CABLEADO y que el descarte sale por el log del transporte en vez de morirse adentro
+  // del framer. El disparador realista no es un atacante: es un lector con otro fin de trama —el
+  // `term cr` que ya se pagó en el SPP— y en BLE no hay framing nativo, así que el framer de JS es lo
+  // ÚNICO que corta.
+  const { d, seen } = await connected();
+  const logs = await withLogs(async () => {
+    // 300 notificaciones de 20 bytes = 6 KB sin un solo terminador (el tope está en 4 KB).
+    for (let i = 0; i < 300; i += 1) d.notify('9'.repeat(BLE_DEFAULT_NOTIFY_PAYLOAD));
+    await flush();
+  });
+  assert.ok(
+    logs.some((l) => l.includes('ble_framer_overflow')),
+    'el descarte del framer tiene que llegar al log del transporte: sin eso el operario bastonea, no pasa nada, y no queda rastro',
+  );
+  assert.deepEqual(seen.tags, [], 'nada de ese chorro se ingiere: nunca cerró una trama');
+  assert.equal(seen.statuses.at(-1), 'connected', 'el descarte NO desconecta (manual-first intacto, R7.2)');
+
+  // Y el transporte sigue leyendo. La cola del pedazo descartado cierra primero y se TIRA (le falta el
+  // principio: entregarla sería ingerir una trama recortada, RBM1.8); la trama entera que llega detrás sí
+  // se lee, sin que nadie tenga que reconectar el bastón.
+  d.notify('999999999999999\n');
+  d.notify(`${RAW_FRAME}\n`);
+  assert.equal(seen.tags.length, 1, 'fail-closed no es fail-dead');
+  assert.deepEqual(ingestRawLine(seen.tags[0], TEST_DRIVER.frameParser), { ok: true, eid: EID_982 });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1578,6 +1631,81 @@ test('RBM3.10: conectado y MUDO queda escrito (`connected_silent`) y NO se desco
   );
   assert.equal(seen.statuses.at(-1), 'connected', 'el silencio NO desconecta: es normal si nadie bastonea');
   assert.equal(e.state.timers('watchdog').length, 1, 'el watchdog se re-arma');
+});
+
+test('HIGH-1 del Gate 2: los bytes que NO cierran trama dejan de esconderse detrás del reloj de salud', async () => {
+  // EL MUTANTE QUE ESTE TEST MATA: mover el reloj de salud con CADA CHUNK (lo que hacía el `lastDataAt`
+  // de antes). Con eso, el peor estado del transporte —conectado, con el lector hablando y NINGUNA trama
+  // cerrando: el terminador equivocado, o un peer inundando la característica— dejaba el watchdog en
+  // verde PERMANENTE y no salía UNA SOLA LÍNEA de log. No es que la defensa no actuara (ya sabíamos que
+  // solo loguea): es que ni loguaba, mientras el buffer del framer crecía por debajo.
+  const { seen, e, d } = await connected({
+    envOpts: {
+      clock: CLOCK_START,
+      timeouts: { call: 0, prompt: 0, connect: 0, scan: 0, livenessPoll: 15_000, silence: 45_000 },
+    },
+  });
+  const logs = await withLogs(async () => {
+    // Un minuto de "el bastón habla y no cierra trama" (200 bytes en total: MUY por debajo del tope del
+    // framer, así que lo único que puede delatarlo es el reloj de salud, no el descarte).
+    for (let i = 0; i < 10; i += 1) {
+      e.state.advance(6_000);
+      d.notify('9'.repeat(BLE_DEFAULT_NOTIFY_PAYLOAD));
+    }
+    e.state.fire('watchdog');
+    await flush();
+  });
+  const unframed = logs.find((l) => l.includes('ble_stream_unframed'));
+  assert.ok(unframed, `el estado tiene que quedar ESCRITO: ${logs.join(' | ')}`);
+  assert.match(unframed, /bytes hace 0 ms/, 'los bytes SÍ estaban llegando (por eso no es mudez)');
+  assert.match(
+    unframed,
+    /sin cerrar trama hace 60000 ms/,
+    'y hace un minuto que no cierra una trama: la firma exacta del terminador equivocado',
+  );
+  assert.equal(
+    logs.some((l) => l.includes('connected_silent')),
+    false,
+    'NO es `connected_silent`: ese evento significa que no llega un byte (RBM3.10), y acá llegan',
+  );
+  assert.equal(
+    logs.some((l) => l.includes('ble_framer_overflow')),
+    false,
+    'a 200 bytes el tope NO tiene que haber disparado: si disparara, este test mediría otra cosa',
+  );
+  assert.deepEqual(seen.tags, [], 'y no se ingirió nada: nunca hubo una línea');
+  assert.equal(seen.statuses.at(-1), 'connected', 'el diagnóstico no desconecta (RBM3.10)');
+});
+
+test('una trama que quedó A MEDIAS hace rato NO convierte la mudez en "entra basura"', async () => {
+  // EL MUTANTE QUE ESTE TEST MATA: discriminar con `bytesMs < silentMs` en vez de con la VENTANA de
+  // silencio. Parecen equivalentes y no lo son: un pedazo de trama que quedó a medias en un momento
+  // benigno (el operario sacó el bastón de rango a mitad de un bastonazo) deja el reloj del byte un
+  // poquito por delante del de la trama PARA SIEMPRE, y con la comparación entre relojes el link mudo
+  // se reportaría "con bytes que no cierran trama" en todos los polls siguientes — un diagnóstico
+  // falso, que es peor que no tener ninguno.
+  const { e, d } = await connected({
+    envOpts: {
+      clock: CLOCK_START,
+      timeouts: { call: 0, prompt: 0, connect: 0, scan: 0, livenessPoll: 15_000, silence: 45_000 },
+    },
+  });
+  e.state.advance(5_000);
+  d.notify(RAW_FRAME); // media trama: llegó sin su fin de trama y ahí quedó
+  e.state.advance(60_000); // y después, silencio de verdad: nadie bastonea
+  const logs = await withLogs(async () => {
+    e.state.fire('watchdog');
+    await flush();
+  });
+  assert.ok(
+    logs.some((l) => l.includes('connected_silent')),
+    `el link está MUDO y así tiene que decirlo: ${logs.join(' | ')}`,
+  );
+  assert.equal(
+    logs.some((l) => l.includes('ble_stream_unframed')),
+    false,
+    'no entró un byte en toda la ventana de silencio: llamarlo "entra basura" sería inventar una causa',
+  );
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════

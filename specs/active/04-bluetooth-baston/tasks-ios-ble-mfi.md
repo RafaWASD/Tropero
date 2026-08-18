@@ -368,6 +368,45 @@ El orden **no es una preferencia**: cada fase existe donde está porque la anter
       del bloque de tests del cliente y se verificó que su bloque (rebrand fase 5 + `stage-runner`) siguiera
       intacto. Cubre: todas.
 
+## Fase F5-fix — fix-loop del Gate 2 (HIGH-1 + MEDIUM-2)
+
+> Entrada: `progress/security_code_04-ios-ble-mfi.md` (veredicto FAIL). Informe:
+> `progress/impl_ios-ble-mfi-gate2-fix.md`. Alcance cerrado a los dos findings: **no** se empezó F6 ni F7.
+
+- [x] **TF.1** — `line-framer.ts`: tope del buffer (`LINE_FRAMER_MAX_BUFFER = 4096`, parametrizable pero
+      **no apagable**: `0`/`Infinity`/`NaN` caen al default), descarte **fail-closed con log**
+      (`ble_framer_overflow`, sub-evento de `read_loop_error`) y **resync** — la primera línea que cierra
+      después del descarte no se emite, porque le falta el principio y un parser que BUSQUE el EID en vez de
+      anclarlo podría extraer uno que nadie leyó. `flush()` post-descarte devuelve `null` por el mismo
+      motivo. Cubre: RBM2.19, RBM1.8.
+- [x] **TF.2** — `adapter-ble-gatt.ts`: dos relojes (`lastLineAt` = salud, `lastByteAt` = bytes crudos) y el
+      watchdog distingue TRES causas: mudez real (`connected_silent`, RBM3.10 sin cambios) vs. bytes que no
+      cierran trama (`ble_stream_unframed`, con los dos intervalos). Cubre: RBM3.12.
+- [x] **TF.3** — `line-framer.test.ts` (**el archivo no existía**): 12 tests con el caso legítimo primero
+      —trama partida en notificaciones de 20 bytes, troceo de a 1 carácter, ráfaga de 500 tramas pegadas, fin
+      de trama de dos caracteres partido entre chunks—, el tope, el evento distinguible, el no-envenenamiento,
+      el resync, `flush`/`reset`, "el tope no es opcional" y el presupuesto de costo (25.000 notificaciones:
+      medido 4-6 ms con tope, 2200-2450 ms sin tope). Cubre: RBM2.19.
+- [x] **TF.4** — `adapter-ble-gatt.test.ts`: dos tests nuevos —el chorro sostenido llega al log del transporte
+      y el transporte sigue leyendo después (fail-closed no es fail-dead), y el reloj de salud no lo mueve la
+      basura— más las aserciones de MEDIUM-2 dadas vuelta (antes exigían que el identificador ESTUVIERA en el
+      log; ahora exigen que no esté en ninguna línea). Cubre: RBM2.19, RBM3.12, RBM5.13.
+- [x] **TF.5** — MEDIUM-2: el escaneo loguea el **ordinal** del dispositivo no reconocido y no su
+      identificador; `device_id` entra a `PII_KEYS_RAW` de `redact.ts` (defensa en profundidad para el
+      `connect_superseded { deviceId }`, que sí es un campo con clave) + 2 tests en `redact.test.ts`, uno de
+      ellos documentando por comportamiento **por qué** el scrubber key-based no puede ser la defensa
+      principal. Cubre: RBM5.13.
+- [x] **TF.6** — Falsificación: **7 mutantes**, uno por invariante, todos MUEREN, con control positivo sin
+      mutar en verde y restauración verificada contra backup propio. La lista vive en la cabecera de
+      `line-framer.test.ts` y el detalle en el informe. Cubre: RBM2.19, RBM3.12, RBM5.13.
+- [x] **TF.7** — `run-tests.mjs`: registrar `line-framer.test.ts` en la lista **explícita** (un test que no
+      corre da falsa confianza). ⚠️ Archivo compartido: se verificó que el bloque de **rebrand fase 5** y el
+      de `stage-runner` siguieran intactos. Cubre: todas.
+- [x] **TF.8** — Reconciliación de specs: **RBM2.19** y **RBM3.12** nuevos, notas bajo RBM2.8 / RBM3.10 /
+      RBM5.13, y `design-ios-ble-mfi.md` §4.1 con el as-built (incluidas las dos decisiones de forma y el
+      hallazgo del meta-guard de cobertura sobre `ble/logging.ts`, que queda como recomendación al leader).
+      Cubre: RBM7.x (mismo patrón `impl_13`).
+
 ## Fase F6 — T5: banco del emulador en `MODO_GATT` (device)
 
 - [ ] **T6.1** — Flashear el ESP32 con `-DEMU_MODE=MODO_GATT`; verificar con `selftest` y `status`; renombrarlo con `name` para ejercitar **reconocido** (`EMU-GATT-STICK`) y **no reconocido**. Cubre: RBM6.1, RBM5.13.
@@ -422,11 +461,13 @@ El orden **no es una preferencia**: cada fase existe donde está porque la anter
 | RBM2.16 | T3.10 |
 | RBM2.17 | T2.1, T2.2 |
 | RBM2.18 | T2.0 |
+| **RBM2.19** | **TF.1, TF.3, TF.4, TF.6** |
 | RBM3.1–RBM3.11 | T3.9, T3.11, T3.12, T6.2, **T4.10 + T6.4** (RBM3.8 en iOS: el arranque en frío no construye el manager) |
+| **RBM3.12** | **TF.2, TF.4, TF.6** |
 | RBM4.1–RBM4.9 | T5.1–T5.6, T2.2, T2.3, T4.2 |
 | RBM5.1–RBM5.10 | T4.1, T4.2, T4.5, T4.6, T4.7, **T4.11 + T4.12** (RBM5.6/RBM5.7: el camino de escritura de la preferencia y su guard de alcanzabilidad) |
 | RBM5.11 | T4.3 (contraparte: **no** se registra el HR5 v3) |
-| RBM5.12, RBM5.13 | T4.3, T4.4 |
+| RBM5.12, RBM5.13 | T4.3, T4.4, **TF.5** (MEDIUM-2: el log no lleva el id del device ajeno) |
 | RBM5.14 | T4.8, T4.9, **T4.11** (elegir → conectar, con granularidad de transporte) |
 | RBM6.1–RBM6.6 | T6.1–T6.5 |
 | RBM7.1–RBM7.6 | T8.1–T8.6, T7.1.4 |

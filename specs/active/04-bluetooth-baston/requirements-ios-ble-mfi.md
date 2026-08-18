@@ -141,6 +141,8 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 > `new LineFramer()` sobrevivía la suite entera, porque el único delimitador que llegaba al adapter era `'\n'`,
 > que es exactamente el default.
 
+> **Reconciliación (fix-loop del Gate 2, 2026-08-17)**: la nota de arriba nombra *"el buffer creciendo para siempre"* como el síntoma del terminador equivocado, y el as-built de F3 **no lo acotaba**. Ahora sí: el tope, el descarte fail-closed y el resync son **RBM2.19**, y la detección temprana del mismo estado es **RBM3.12**.
+
 **RBM2.9** Cuando llegan **dos tramas pegadas** en una misma notificación, el sistema deberá entregarlas como dos lecturas separadas.
 
 **RBM2.10** Si el driver declara para su transporte `ble-gatt` un delimitador que este adaptador no puede framear (vacío), entonces el sistema **no deberá** abrir la conexión y deberá registrarlo con su motivo (misma honestidad que el chequeo del delimitador del SPP, 🟠-5).
@@ -197,6 +199,18 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 >
 > 1. **La premisa era FALSA**: `react-native-ble-plx` **no tiene una sola fuente C++/JSI** (cero `.cpp`/`.hpp`/`.cc`; los únicos `.h` son cabeceras de puente ObjC/Swift). El modo de falla de `quick-sqlite` **no tiene dónde ocurrir**. La analogía era incorrecta acá también.
 > 2. **El riesgo real es otro, y el build lo dejó a la vista**: el codegen produce un `schema.json` **vacío** (`{"libraryName":"","modules":{}}`) porque la lib **no tiene specs de TurboModule**; su clase es `ReactContextBaseJavaModule` → es un **módulo de puente LEGACY** que bajo bridgeless anda por la **capa de interop**. O sea que el build prueba *compila + linkea + autolinkea + empaqueta* (`BUILD SUCCESSFUL 3m 23s`, `PackageList.java` con `BlePlxPackage`, APK generado, **0 builds de EAS**) y **no** prueba que el puente resuelva en runtime. Lo que sostiene esa mitad es un precedente fuerte —`react-native-bluetooth-classic` es la misma clase de módulo y **lee de verdad en device** sobre este mismo stack— y la medición definitiva es el banco de **RBM6.1**, que es donde ya estaba puesta. El "compila" **no** se lee como "el transporte anda" (lección de `dad711f`).
+
+**RBM2.19** Mientras un transporte alimente al `LineFramer`, el sistema deberá acotar su buffer con un **tope de tamaño**; si el tope se pasa, el sistema deberá **descartar** todo lo acumulado, deberá **registrarlo** con un evento distinguible del silencio (`ble_framer_overflow`) y **no deberá** truncar en silencio, desconectar, ni bloquear la carga manual. Además deberá **descartar la primera línea que cierre después del descarte** (le falta el principio), de modo que nunca se ingiera una trama recortada.
+
+> **De dónde sale este requisito**: es el **HIGH-1 del Gate 2 del delta** (`progress/security_code_04-ios-ble-mfi.md`, fix en `progress/impl_ios-ble-mfi-gate2-fix.md`). El buffer del framer acumulaba **sin cota** y ninguna defensa lo tapaba: el watchdog de mudez miraba un reloj que **la propia basura reseteaba** (ver RBM3.12), la sonda de liveness pregunta si el peer está conectado —y el que inunda lo está— y `isValidTag`/dedup/confirmación corren *después* del framer. Hasta este delta el único call site de producción era `adapter-web-serial` (web, escritorio, detrás del gesto obligatorio de `requestPort()`); `adapter-ble-gatt` es el **primero nativo, sobre la radio y que auto-conecta sin gesto** (RBM2.16), y en BLE **no hay framing nativo**: el framer de JS es lo único que corta.
+>
+> **El disparador realista no es un atacante**: un lector cuyo fin de trama no coincide con el que declara su `ReaderDriver` — el `term cr` / 🟠-5 que ya se pagó en el SPP, medido en device. (El adversarial también existe —`deviceMatch` por nombre anunciado, NUS sin pairing ni cifrado, ADR-003— y el mismo tope lo cubre.)
+>
+> **El daño era manual-first, no memoria.** Sin tope, cada notificación vuelve a **aplanar** un buffer que crece (el `indexOf` necesita la cadena plana): el costo es cuadrático y el hilo de JS se muere mucho antes que la RAM. Medido con 25.000 notificaciones de 20 bytes: **4-6 ms con tope, 2200-2450 ms sin tope**. Un proceso que se muere se lleva la carga manual, en la manga y sin señal — y eso rompe el invariante duro de la unidad (R7.2 / R9.6 / RBM9.5), que todos los demás modos de falla de este delta respetan.
+>
+> **As-built** (`line-framer.ts`): tope `LINE_FRAMER_MAX_BUFFER = 4096` caracteres (~117× la trama legítima más larga que conocemos, la del RS420: 35), parametrizable por constructor **pero no apagable** — cualquier valor que no sea un número finito ≥ 1 (incluidos `0` e `Infinity`) cae al default, porque un invariante que un call site puede desactivar es una opción y una opción se elige mal exactamente una vez. El evento sale como **sub-evento por mensaje** de `read_loop_error` (`ble_framer_overflow: descartados N de tope M`), que es la forma que ya usan `ble_decode_failed` / `ble_monitor_lost` / `ble_scan_error` / `liveness_probe_unavailable` en este transporte: una entrada que llega y se descarta es esa misma familia. Vigilado por `line-framer.test.ts` (el archivo **no existía**: el invariante no lo miraba nada), con los mutantes que caen listados en su cabecera.
+>
+> **Lo que se descartó, dicho para que no se reintente a ciegas**: arrancar el `indexOf` en el *solape* en vez de en 0 (O(chunk) en vez de O(buffer)). Medido **dentro del tope no mueve el tiempo** (4 ms vs 6 ms) y agrega el riesgo de partir mal un fin de trama de dos caracteres que cae entre dos notificaciones. No se paga riesgo de framing por una mejora de cero.
 
 ## RBM3. Las lecciones del SPP son requisitos del transporte nuevo, no sugerencias
 
@@ -292,6 +306,8 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 
 **RBM3.10** Mientras el link esté conectado y no llegue un byte durante el presupuesto de silencio, el sistema deberá dejarlo escrito en el log (`connected_silent`) sin desconectar, para distinguir "conectado y mudo" de "socket muerto" y de "el operario no bastonea" (🟠-5).
 
+> **Reconciliación (fix-loop del Gate 2, 2026-08-17)**: este requisito se cumple **literal y sin cambios** (no llega un byte → `connected_silent`), pero el as-built de F3 lo cumplía sobre un reloj que **cualquier byte** reseteaba, así que el caso "entran bytes y no cierran trama" —el peor de los tres que este evento vino a distinguir— no producía **ningún** log. Ese caso pasó a tener requisito y evento propios: **RBM3.12** (`ble_stream_unframed`).
+
 **RBM3.11** El sistema deberá ejercitar la máquina de estados completa del adaptador BLE en `node:test` con el entorno **inyectado** (patrón `SppEnv`), incluidas las promesas que **no resuelven nunca**, el reloj y la desconexión de otro dispositivo.
 
 > **Reconciliación al as-built (F3, fix-loop del review 🟡-3)** — "el reloj" estaba **inyectado pero no
@@ -302,6 +318,16 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 > un instante REAL (`CLOCK_START`) y los dos mutantes caen. La misma corrección se aplicó a los presupuestos
 > del doble (eran los cuatro iguales, así que **cuál** presupuesto acota **cuál** await tampoco se podía
 > observar): ahora son distintos y los tests asertan el `ms` del `bridge_timeout`.
+
+**RBM3.12** Mientras el link esté conectado, el sistema deberá medir la salud del stream por la **última trama COMPLETA** y **no** por el último byte recibido; y si durante el presupuesto de silencio entran bytes que **no cierran ninguna trama**, deberá registrarlo con un evento propio (`ble_stream_unframed`, con los dos intervalos: desde el último byte y desde la última trama) **distinto** de `connected_silent`.
+
+> **De dónde sale**: es la segunda mitad del HIGH-1 del Gate 2. `connected_silent` (RBM3.10) comparaba contra un reloj que se refrescaba con **cada chunk**, así que el peor estado del transporte —conectado, con el lector hablando y ninguna trama cerrando— mantenía el watchdog en **verde permanente**: no es que la defensa no actuara (ya sabíamos que solo loguea), es que **ni loguaba**, mientras el buffer del framer crecía por debajo.
+>
+> **RBM3.10 no cambia de significado**: sigue siendo "no llegó un byte" y sigue emitiendo `connected_silent` en ese caso (los dos relojes coinciden cuando nadie bastonea). Lo que se agrega es la **tercera causa**, que antes era invisible y ahora tiene nombre propio. Los dos intervalos juntos son el diagnóstico: `bytes hace 0 ms, sin cerrar trama hace 60000 ms` es la firma exacta del terminador equivocado, y aparece a los 45 s en vez de esperar los ~4 KB que tarda el tope del framer en descartar.
+>
+> **El discriminador es la VENTANA**, no la comparación entre los dos relojes: "entró un byte DENTRO del presupuesto de silencio". Comparar `bytesMs < silentMs` parece equivalente y no lo es — una trama que quedó a medias en un momento benigno deja el reloj del byte por delante para siempre y el link mudo se reportaría "con basura" en todos los polls siguientes, que es un diagnóstico FALSO (peor que ninguno). Con la ventana, ese caso se autocorrige en el poll siguiente. Los dos mutantes mueren en `adapter-ble-gatt.test.ts`.
+>
+> **En los transportes con framing NATIVO no aplica** y no se toca nada: en `spp-android` y `mfi-ios` el nativo entrega la trama y `splitSppPayload` no acumula, así que un payload recibido **es** una línea — byte y trama son el mismo evento.
 
 ## RBM4. `adapter-mfi-ios` — prearmado y gateado por la lista de protocolos (T3)
 
@@ -556,6 +582,8 @@ Este delta hace **siete cosas** (T1…T7 del contexto §4 y §7):
 > **muere** en `adapter-ble-gatt.test.ts` (y para que muriera hubo que arreglar el test: con un driver que
 > matchea solo por nombre, el mutante pasaba en verde). Se prueban además los **dos** nombres que el SO expone
 > (`name` del GAP y `localName` del anuncio), porque el emulador se identifica por el del anuncio.
+
+> **Reconciliación (fix-loop del Gate 2, MEDIUM-2, 2026-08-17) — el rastro del "no reconocido" NO lleva el identificador del dispositivo.** El as-built de F3 loguéaba `ble_device_not_recognized: ${device.id}`, y estos dispositivos son de **terceros** por definición (cualquier periférico que anuncie el servicio y no matchee: el bridge de la balanza, un teléfono ajeno, lo que haya en el campo). En Android `device.id` de `react-native-ble-plx` **es la MAC**; el evento viaja a un breadcrumb de Sentry y ahí el scrubber de `redact.ts` es **key-based**, así que un identificador interpolado en el free-text de `message` no lo alcanza ninguna defensa. As-built: el log lleva el **ordinal dentro del escaneo** (`ble_device_not_recognized: #1 del escaneo`), que da el mismo diagnóstico —cuántos aparecieron y cuándo— sin mandar el identificador de nadie a un tercero. El mutante que devuelve el `device.id` al mensaje **muere** en dos tests de `adapter-ble-gatt.test.ts` (uno de ellos exigía justo lo contrario antes de este fix). Defensa en profundidad, aparte: `device_id` entró a `PII_KEYS_RAW` de `redact.ts`, que cubre el `connect_superseded { deviceId }` de los tres adapters (ese sí es un campo con clave, alcanzable por el scrubber).
 
 **RBM5.14** El sistema deberá presentar en la pantalla de conexión el flujo específico de los transportes nuevos (BLE: escanear → listar → elegir → conectar; MFi: instrucción del Accessory Picker de iOS + el estado "falta el protocolo del fabricante"), derivándolo del `ReaderBinding` como ya hace el resto (RMV3.2).
 

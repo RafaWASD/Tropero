@@ -531,8 +531,19 @@ export class BleGattAdapter implements StickAdapter {
   private pendingTarget: string | null = null;
   /** Cuándo se estableció el link vigente (dwell del backoff, RBM3.9). null = no hay link. */
   private connectedAt: number | null = null;
-  /** Cuándo llegó el último byte (watchdog de conectado-y-mudo, RBM3.10). */
-  private lastDataAt = 0;
+  /**
+   * Cuándo se cerró la última TRAMA COMPLETA. Es el reloj de SALUD del link (watchdog de
+   * conectado-y-mudo, RBM3.10) y por eso lo mueve la LÍNEA, no el byte: mientras lo movía cualquier
+   * chunk, un flujo que no cierra trama —el terminador equivocado del lector, o un peer inundando la
+   * característica— dejaba el watchdog en verde PERMANENTE y del peor estado del transporte no quedaba
+   * ni rastro en el log (HIGH-1 del Gate 2). "Llegan bytes" no es "el transporte funciona".
+   */
+  private lastLineAt = 0;
+  /**
+   * Cuándo llegó el último BYTE (cerrara trama o no). NO decide la salud: solo acompaña al
+   * `connected_silent` para separar "mudo de verdad" de "entra basura que no cierra trama".
+   */
+  private lastByteAt = 0;
   /** Hasta cuándo puede reintentar la cadena vigente. `null` = SIN tope (la arrancó un gesto). */
   private retryBudgetUntil: number | null = null;
   /** Cuándo arrancó la cadena vigente (para poder decir en el log cuánto duró). */
@@ -1013,7 +1024,8 @@ export class BleGattAdapter implements StickAdapter {
       const session = ++this.session;
       this.device = device;
       this.connectedAt = this.now();
-      this.lastDataAt = this.now();
+      this.lastLineAt = this.now();
+      this.lastByteAt = this.now();
       // EL PRESUPUESTO DE LA CADENA MUERE ACÁ (🔴-A del review del SPP / HIGH-1 de su Gate 2). El tope
       // de la cadena `autoconnect` existe por UN motivo —"ese bastón lo vendí, lo rompí o quedó en otro
       // campo"— y en el instante en que el bastón CONTESTA ese motivo dejó de aplicar. Sin esta línea,
@@ -1067,9 +1079,19 @@ export class BleGattAdapter implements StickAdapter {
             logTransportEvent({ kind: 'read_loop_error', message: 'ble_decode_failed' });
             return;
           }
-          // Bytes que llegaron = el link no está mudo, incluso si la trama todavía no está completa.
-          this.lastDataAt = this.now();
-          for (const line of framer.push(text)) {
+          // DOS RELOJES, Y LA DIFERENCIA ES EL ARREGLO DE HIGH-1 (Gate 2). Antes había uno solo y lo
+          // movía cualquier byte, así que un flujo que nunca cierra trama mantenía el watchdog de mudez
+          // en verde para siempre: el terminador equivocado del lector (`term cr`, medido en device) y
+          // un peer que inunda la característica quedaban INVISIBLES, con el buffer del framer creciendo
+          // por debajo. Ahora la salud del link la mueve la TRAMA COMPLETA; el byte solo se anota para
+          // que el log pueda decir "entran bytes y no cierran trama" en vez de "está mudo".
+          this.lastByteAt = this.now();
+          const lines = framer.push(text);
+          // Fuera del `if (this.listening)` a propósito: que la trama CIERRE es salud del transporte,
+          // no ingesta. Si dependiera de la escucha, un link sano con la escucha apagada (la app en otra
+          // pantalla) se reportaría mudo.
+          if (lines.length > 0) this.lastLineAt = this.now();
+          for (const line of lines) {
             if (this.listening) this.emitTag(line); // línea CRUDA → contrato (RBM2.8)
           }
         },
@@ -1181,9 +1203,15 @@ export class BleGattAdapter implements StickAdapter {
           if (seen.has(device.id)) return; // el mismo anuncio repetido no agrega información
           seen.add(device.id);
           if (!this.recognizes(device)) {
+            // SIN EL `device.id` (MEDIUM-2 del Gate 2). Estos dispositivos son de TERCEROS —cualquier
+            // periférico que anuncie el servicio y no matchee: el bridge de la balanza Vesta, un
+            // teléfono ajeno— y su `id` es la MAC en Android. Iba interpolado en el free-text de
+            // `message`, o sea al breadcrumb de Sentry por un camino donde el scrubber key-based de
+            // `redact.ts` no puede llegar. El ordinal dentro del escaneo da el mismo diagnóstico ("vi
+            // N y ninguno era un bastón") sin mandar el identificador de nadie a un tercero.
             logTransportEvent({
               kind: 'connect_error',
-              message: `ble_device_not_recognized: ${device.id}`,
+              message: `ble_device_not_recognized: #${seen.size} del escaneo`,
             });
             return;
           }
@@ -1299,8 +1327,30 @@ export class BleGattAdapter implements StickAdapter {
       () => {
         this.cancelWatchdog = null;
         if (this.closed || this.session !== session) return;
-        const silentMs = this.now() - this.lastDataAt;
-        if (silentMs >= this.ms('silence')) logTransportEvent({ kind: 'connected_silent', ms: silentMs });
+        // DOS CAUSAS, DOS EVENTOS (arreglo de HIGH-1 del Gate 2). `lastLineAt` es el reloj de SALUD y lo
+        // mueve la TRAMA CERRADA; `lastByteAt` mueve con cualquier byte. Cuando el link está de verdad
+        // mudo los dos valen lo mismo y sale `connected_silent` (RBM3.10, sin cambios). Cuando entran
+        // bytes que NUNCA cierran trama —el terminador equivocado del lector (`term cr`, medido en device)
+        // o un peer inundando la característica— antes no salía NADA (el reloj de salud lo reseteaba la
+        // propia basura y el watchdog quedaba en verde permanente): ahora sale `ble_stream_unframed`, que
+        // nombra la causa en vez de dejar que el operario descubra solo que no lee.
+        const silentMs = this.now() - this.lastLineAt;
+        if (silentMs >= this.ms('silence')) {
+          const bytesMs = this.now() - this.lastByteAt;
+          // EL DISCRIMINADOR ES LA VENTANA, no la comparación entre los dos relojes: "entraron bytes
+          // DENTRO del presupuesto de silencio y ninguno cerró trama". Comparar `bytesMs < silentMs` a
+          // secas parece equivalente y no lo es — una trama que quedó a medias en un momento benigno deja
+          // `bytesMs` un poco menor para siempre, y el link mudo se reportaría "con basura" en todos los
+          // polls siguientes. Con la ventana, ese caso se autocorrige en el poll siguiente.
+          if (bytesMs < this.ms('silence')) {
+            logTransportEvent({
+              kind: 'read_loop_error',
+              message: `ble_stream_unframed: bytes hace ${bytesMs} ms, sin cerrar trama hace ${silentMs} ms`,
+            });
+          } else {
+            logTransportEvent({ kind: 'connected_silent', ms: silentMs });
+          }
+        }
         void this.verifyLiveness('poll', deviceId);
         this.armWatchdog(session, deviceId);
       },

@@ -198,3 +198,35 @@ test('R7.4: null / undefined / no-objeto no rompen (passthrough seguro)', () => 
   assert.equal(redactEvent(undefined), undefined);
   assert.equal(redactEvent(42 as unknown), 42);
 });
+
+test('MEDIUM-2 (Gate 2 del delta ios-ble-mfi): el id de dispositivo Bluetooth se redacta en el breadcrumb', () => {
+  // El breadcrumb BLE se arma con `data: { ...event }` VERBATIM (payloads.ts), así que el
+  // `connect_superseded { deviceId }` de los tres adapters mandaba el identificador del dispositivo tal
+  // cual: la MAC en Android, el serial del accesorio en MFi. `normalizeKey` colapsa las tres grafías.
+  const out = redactBreadcrumb({
+    category: 'ble',
+    data: { kind: 'connect_superseded', deviceId: '11:22:33:44:55:66', device_id: 'AA:BB:CC', deviceid: 'x' },
+  }) as { data: Record<string, unknown> };
+  assert.equal(out.data.deviceId, '[redacted]');
+  assert.equal(out.data.device_id, '[redacted]');
+  assert.equal(out.data.deviceid, '[redacted]');
+  assert.equal(out.data.kind, 'connect_superseded', 'el kind es diagnóstico: no se toca');
+  assert.equal(JSON.stringify(out).includes('11:22:33:44:55:66'), false);
+});
+
+test('MEDIUM-2: el scrubber por CLAVES no alcanza un id interpolado en un texto (por eso el fix fue sacarlo)', () => {
+  // Este test NO exige una capacidad que el scrubber no tiene: la DOCUMENTA, y por eso el arreglo de
+  // fondo vive en el EMISOR (`ble/adapter-ble-gatt.ts`: el `ble_device_not_recognized` pasó a llevar el
+  // ordinal del escaneo en vez del identificador del dispositivo).
+  // Si algún día el scrubber aprende a barrer identificadores dentro de free-text, este test cae y hay
+  // que venir a celebrarlo acá — mientras tanto, es la razón escrita de por qué la defensa no es esta.
+  const out = redactBreadcrumb({
+    category: 'ble',
+    data: { kind: 'connect_error', message: 'ble_device_not_recognized: 11:22:33:44:55:66' },
+  }) as { data: Record<string, unknown> };
+  assert.equal(
+    String(out.data.message).includes('11:22:33:44:55:66'),
+    true,
+    'un scrubber key-based NO puede tocar un valor embebido en una oración: el fix es no interpolarlo',
+  );
+});

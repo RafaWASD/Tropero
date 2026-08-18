@@ -45,6 +45,16 @@ const PII_KEYS_RAW = [
   'full_name',
   'given_name',
   'family_name',
+  // MEDIUM-2 del Gate 2 del delta `ios-ble-mfi`: identificador de dispositivo Bluetooth. En Android
+  // `device.id` de `react-native-ble-plx` es la MAC; en MFi es el serial del accesorio. No es PII de
+  // persona, pero es un identificador de hardware —propio o de un tercero— que no tiene por qué salir a
+  // un vendor de telemetría. `normalizeKey` lo colapsa, así que esta entrada cubre `deviceId`,
+  // `device_id` y `deviceid` (el `connect_superseded { deviceId }` de los tres adapters).
+  //
+  // ⚠️ Esto es la SEGUNDA línea, no la primera: un scrubber por CLAVES no puede tocar un identificador
+  // interpolado dentro de un `message`. Por eso el arreglo de fondo fue sacarlo del free-text del log
+  // (`ble_device_not_recognized` pasó a llevar un ordinal, ble/logging.ts).
+  'device_id',
 ] as const;
 
 // (b) RAÍCES DE SECRETO → INCLUSIÓN (la clave se redacta si su nombre normalizado CONTIENE la raíz). Un

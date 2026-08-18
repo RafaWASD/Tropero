@@ -330,6 +330,72 @@ El manifiesto **ya declara los cuatro** con los atributos correctos (`with-bluet
 > banco de F6** en Android ≤ 30 y como **recomendación al leader** para `docs/backlog.md` (el archivo lo está
 > tocando la otra terminal, así que esta fase no lo edita).
 
+### 4.1 As-built del fix-loop del Gate 2 (2026-08-17) — el tope del framer y los dos relojes
+
+Informe: `progress/impl_ios-ble-mfi-gate2-fix.md`. Cierra HIGH-1 y MEDIUM-2 de
+`progress/security_code_04-ios-ble-mfi.md`. Cambia **tres** de los pasos de arriba y ninguno agrega
+estado nuevo al flujo de conexión.
+
+**(a) Paso 8 — el framer tiene tope, y el reloj de salud lo mueve la TRAMA (RBM2.19 / RBM3.12).**
+
+```
+8. device.monitorCharacteristicForService(serviceUuid, notifyCharUuid, (err, c) => {
+        if err → read_loop_error + loseLink ; return
+        const text = decodeBase64Ascii(c.value) ; if null → read_loop_error ; return
+        lastByteAt = now()                       # llegaron BYTES (cierren trama o no)
+        const lines = framer.push(text)          # LineFramer con TOPE (4096) — RBM2.19
+        if (lines.length) lastLineAt = now()     # llegó una TRAMA: esto es la SALUD del link
+        for (line of lines) if (listening) onTagRead(line)
+   })
+```
+
+`lastLineAt` se actualiza **fuera** del gate de `listening` a propósito: que la trama cierre es salud del
+transporte, no ingesta — si dependiera de la escucha, un link sano con la escucha apagada (la app en otra
+pantalla) se reportaría mudo.
+
+**(b) Paso 10 — el watchdog distingue TRES causas, no dos.**
+
+```
+watchdog(cada livenessPoll):
+   silentMs = now() - lastLineAt
+   if silentMs >= silence:
+       bytesMs = now() - lastByteAt
+       bytesMs <  silence → read_loop_error 'ble_stream_unframed: bytes hace X ms, sin cerrar trama hace Y ms'
+       bytesMs >= silence → connected_silent {ms}           # RBM3.10, sin cambios
+   verifyLiveness('poll')                                   # RBM3.5, sin cambios
+```
+
+El discriminador es **la ventana** ("entró un byte DENTRO del presupuesto de silencio") y no la comparación
+entre los dos relojes, que parece equivalente y no lo es: un pedazo de trama que quedó a medias en un momento
+benigno deja `bytesMs` un poco por debajo de `silentMs` **para siempre**, y con la comparación el link mudo se
+reportaría "con basura" en todos los polls siguientes — un diagnóstico falso, que es peor que ninguno. Con la
+ventana, ese caso se autocorrige en el poll siguiente. Los dos mutantes (comparar relojes; tragarse las dos
+causas en `connected_silent`) mueren en `adapter-ble-gatt.test.ts`.
+
+**(c) El escaneo ya no loguea el identificador del dispositivo ajeno (MEDIUM-2).**
+`ble_device_not_recognized: ${device.id}` → `ble_device_not_recognized: #${seen.size} del escaneo`. El
+ordinal responde la misma pregunta ("cuántos aparecieron y ninguno era un bastón") sin mandar la MAC de un
+tercero al breadcrumb de Sentry, donde el scrubber key-based de `redact.ts` no puede alcanzar un valor
+interpolado en una oración. Complemento (defensa en profundidad, no la defensa principal): `device_id` en
+`PII_KEYS_RAW`, que sí cubre el `connect_superseded { deviceId }` de los tres adapters.
+
+**Dos decisiones de diseño que se tomaron acá y conviene no re-litigar a ciegas:**
+
+1. **El evento del descarte es un sub-evento por MENSAJE (`read_loop_error`), no un `kind` nuevo del
+   union.** El analyzer recomendó un kind propio; se eligió la otra forma —que es la que ya usan
+   `ble_decode_failed`, `ble_monitor_lost`, `ble_scan_error` y `liveness_probe_unavailable` en este mismo
+   transporte— por un motivo medible: `ble/logging.ts` tiene **148 líneas no vacías con 34 de código**
+   (retención 0.230) y el meta-guard compartido `assertScanCoverage` exige ≥ 0.25 a partir de **150**
+   líneas. O sea que **cualquier** crecimiento de ese union —incluso 2 líneas sin un comentario— pone en
+   rojo a los **9 guards** que escanean el árbol (`brand-name`, `storage-keys`, `today-iso`, …). Medido:
+   con el union crecido, `node --test` de esos 9 daba 9 rojos por "el blanqueo se está comiendo
+   `src/services/ble/logging.ts`". Las alternativas eran purgar prosa de otras unidades de ese archivo o
+   estrenar la allowlist del meta-guard (hoy vacía, y sería la primera): las dos son decisiones que no le
+   corresponden a un fix-loop. **Queda como recomendación al leader** (ver el informe).
+2. **`connected_silent` no cambió de forma ni de significado**, así que `adapter-spp-android` y
+   `adapter-mfi-ios` **no se tocaron**. En esos dos el framing lo hace el nativo y `splitSppPayload` no
+   acumula: byte y trama son el mismo evento y la distinción no tendría qué medir.
+
 ## 5. T3 — `adapter-mfi-ios` y su gate
 
 **Sin dependencia nueva**: es la rama iOS de `react-native-bluetooth-classic` (`ios/conn/*.swift`, `device/NativeDevice.swift`), que ya está instalada.
