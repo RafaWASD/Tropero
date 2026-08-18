@@ -19,9 +19,23 @@ fabricante. Este gate mide **el lado del teléfono**. Dos incógnitas distintas.
 | ESP32 | flasheado en **`MODO_HID`** → se anuncia como teclado BLE con el nombre **`EMU-HID-380`** |
 | PC | para mandarle comandos al ESP32 por COM7 |
 
-**El flasheo lo hago yo** (30 s, el ESP32 está en mi COM7 y el firmware está respaldado en
-`firmware/backup/`). Hoy está en `MODO_SPP`; volver atrás es el mismo comando con `MODO_SPP`. **Decime y lo
-hago** — no lo flasheo por mi cuenta para no cambiarte el banco si estabas usándolo.
+**El flasheo ya está hecho (2026-08-16): el ESP32 de COM7 está en `MODO_HID` y listo.** Volver al banco
+de SPP es el mismo comando con `MODO_SPP` (firmware respaldado en `firmware/backup/`).
+
+> ⚠️ **Contexto que cambia cómo se lee un fallo.** `MODO_HID` **nunca se había ejecutado**: se había
+> entregado verificando que *compilaba*. La primera vez que se flasheó (2026-08-16) entraba en **boot
+> loop** —`LoadProhibited` en la inicialización del BLE HID—, así que jamás había anunciado nada. Está
+> arreglado y medido: arranca, responde `status` / `selftest` / knobs, y **se lo ve en el aire como
+> `EMU-HID-380` anunciando el servicio HID `0x1812`** (escaneo BLE desde la PC). Causa raíz y evidencia:
+> `progress/impl_emulador-hid-crash.md`.
+>
+> Lo que **no** se pudo medir sin iPhone es justamente lo que decide el gate: el emparejamiento y el
+> tecleo. Adrede no se emparejó desde la PC — un bond de Windows le puede robar la conexión al iPhone en
+> plena medición.
+>
+> Y si en (d) el iPhone corta el link al mandar la app a background, el emulador **vuelve a anunciarse
+> solo**: eso también se arregló en esa pasada. Antes quedaba invisible para siempre y habría fabricado
+> un "iOS no reconecta" que era nuestro.
 
 ## Paso 0 — Emparejar (esto sí es tuyo)
 

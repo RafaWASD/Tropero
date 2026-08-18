@@ -37,6 +37,35 @@ bastón; los de BLE **no** matchean a propósito, porque hoy no hay driver BLE-H
 registro y lo honesto es que aparezcan como "no reconocido" (RMV3.8). Con `name` se puede forzar
 cualquiera de los dos estados.
 
+## Qué está verificado EN HARDWARE, y qué sólo compilaba
+
+⚠️ **La tabla de arriba dice qué prueba cada modo, no qué modo se probó.** No son equivalentes.
+
+Los tres modos se entregaron el 2026-07-29 verificando que **compilaban** y que cada `.bin` contenía su
+cadena de modo. El flasheo lo hacía Raf y hasta el 2026-08-16 sólo se había usado `MODO_SPP`. La primera
+vez que se flasheó `MODO_HID` **boot-lopeaba**: `Guru Meditation Error: Core 1 panic'ed
+(LoadProhibited)` dentro de `txBegin()`, o sea que ese modo **nunca se había anunciado ni una vez**.
+Causa raíz (una trampa de `BLEHIDDevice`, ver *Notas de mantenimiento*), evidencia del serie y
+falsificación: `progress/impl_emulador-hid-crash.md`. Es el mismo "compila ≠ funciona" del que nació
+este banco.
+
+| modo | ¿corrió en hardware? | qué se midió, y cuándo |
+|---|---|---|
+| `MODO_SPP` | ✅ **sí**, desde 2026-07-29 | el banco entero contra el teléfono (`bench/run-bench.py`, resultados en `progress/bench_baston-spp-emulador.md`) |
+| `MODO_HID` | ✅ **desde 2026-08-16** (antes: boot loop) | arranca sin loop; `status` / `selftest` / `help`; los knobs `hidterm` · `hiddelay` · `hidraw`; `read`, `drop`, `off`; y **se lo ve en el aire como `EMU-HID-380` anunciando el servicio HID `0x1812`** (escaneo BLE desde la PC) |
+| `MODO_GATT` | ✅ **desde 2026-08-16** (antes: nunca ejecutado) | arranca; anuncia `EMU-GATT-STICK`; acepta la conexión de un central; **notifica la trama partida en 20 + 17 bytes** (el chunking que tiene que reensamblar `LineFramer`); y se re-anuncia al desconectarse |
+
+**Lo que sigue sin verificarse en hardware**, y por qué no se puede desde acá:
+
+- **`MODO_HID` — el emparejamiento y el tecleo.** Que tipee los 15 dígitos dentro de un `TextInput`
+  necesita un host emparejado: **eso es el gate**, y lo corre Raf con el iPhone
+  (`progress/gate_hid-runbook.md`). Adrede **no** se emparejó desde la PC: un bond de Windows deja al
+  emulador reconectándose solo con la PC y le puede robar la conexión al iPhone en plena medición.
+- **`MODO_GATT` — el consumo desde la app.** `adapter-ble-gatt` todavía no existe (T-MV.6.3): lo
+  verificado es el lado del emulador, no el nuestro.
+- **La coexistencia de los tres stacks en un binario** (ver la sonda más abajo): se midió el tamaño,
+  no el arranque.
+
 ## La trama que emite
 
 Capturada en campo con un lector real (`specs/active/04-bluetooth-baston/field-findings.md`) y
@@ -129,14 +158,17 @@ O por partes (los offsets salen del `flash_args` que genera el propio build):
 **Volver a la balanza**: `firmware/backup/README.md` tiene el volcado del bridge Vesta y el
 procedimiento de restauración con su SHA-256.
 
-### Tamaños medidos (arduino-esp32 3.3.8, partición default 4MB, 2026-07-29)
+### Tamaños medidos (arduino-esp32 3.3.8, partición default 4MB)
 
 | build | flash | % de 1.310.720 | globals |
 |---|---|---|---|
-| `MODO_SPP` | 1.071.256 B | 81 % | 42.016 B |
-| `MODO_HID` | 1.112.843 B | 84 % | 41.472 B |
-| `MODO_GATT` | 1.110.547 B | 84 % | 41.536 B |
+| `MODO_SPP` | 1.071.288 B | 81 % | 42.016 B |
+| `MODO_HID` | 1.113.211 B | 84 % | 41.472 B |
+| `MODO_GATT` | 1.110.683 B | 84 % | 41.536 B |
 | sonda con los TRES stacks linkeados | 1.113.523 B | 84 % | 42.360 B |
+
+Los tres primeros re-medidos el **2026-08-16** con los fixes del HID adentro; la sonda es del
+2026-07-29 y **no** se volvió a medir (es un sketch aparte).
 
 **Los tres entran en un solo binario y en la partición por defecto — el supuesto de que no entraban es
 falso.** Medido: la sonda que linkea Classic SPP + BLE HID + BLE GATT juntos pesa 1.113.523 B, apenas
@@ -178,7 +210,7 @@ el device. Todo lo que imprime el emulador va con prefijo `[emu]`.
 | `gap <ms>` | separación por defecto de una serie |
 | `auto <ms>` | emisión automática cada `ms` (`0` = apagar) |
 | `mute <s>` | **conectado pero MUDO** `s` segundos (`0` cancela) → "el bastón está prendido pero no lee". Suprime **todo** lo que salga (lecturas, malformadas, `split`, `double`): el chequeo está en el único punto por el que sale un byte, así que un escenario nuevo nace respetándolo |
-| `drop` | **corta el link desde el emulador**, sigue visible y emparejado → "salió de rango" |
+| `drop` | **corta el link desde el emulador**, sigue visible y emparejado → "salió de rango". En los dos modos BLE eso obliga a **re-anunciarse** después de la desconexión: el stack deja de anunciarse cuando entra un central y `advertiseOnDisconnect(false)` no lo reanuda. Hasta el 2026-08-16 no se hacía y el emulador quedaba **invisible para siempre** después del primer corte (medido: dos escaneos de 10 s sin verlo) — arreglado y medido de nuevo (vuelve al aire en ~400 ms), con `off` intacto (con la radio abajo **no** se re-anuncia) |
 | `off <ms>` | radio abajo `ms`: **desaparece del aire** → "se apagó el bastón" |
 | `flap <n> <ms>` | `n` ciclos de `off`/`on` con `ms` abajo y 4 s arriba entre corte y corte → martilla el backoff (el bug 3) |
 | `bad <caso>` | trama malformada: `header` `short` `long` `alpha` `tsjunk` `nots` `noterm` `binary` `empty` `garbage` |
@@ -299,3 +331,19 @@ T-MV.5.6 / T-MV.5.7 y en `context-multivendor.md`.
   revisarlo; `MODO_HID` y `MODO_GATT` no dependen de esa clase.
 - **Si cambia la trama del lector**, se cambia en **un** lugar: la sección 3. Los tres modos la
   consumen. Y se re-verifica contra `app/src/services/ble/parser-rs420.test.ts`, que es el contrato.
+- **`BLEHIDDevice` tiene una trampa que boot-lopea.** Su constructor **no** crea la característica de
+  fabricante (`0x2a29`): la crea el *getter* `manufacturer()` (`BLEHIDDevice.cpp:128-130`), mientras que
+  el *setter* `manufacturer(String)` escribe derecho por un puntero que **no tiene inicializador**
+  (`BLEHIDDevice.h:92`). Llamar al setter sin haber llamado antes al getter desreferencia basura →
+  `LoadProhibited`. Por eso va `g_hid->manufacturer()->setValue(...)`, que es la forma del ejemplo
+  `Server_Gamepad` de la propia librería. Si algún día se agregan más características opcionales del
+  HID (`outputReport`, `bootInput`, …), **leer el `.cpp` instalado antes**: la mitad de esta clase son
+  getters que crean.
+- **En BLE, desconectarse ≠ seguir visible.** El stack corta el advertising cuando entra un central y
+  `advertiseOnDisconnect(false)` (que usan `MODO_HID` y `MODO_GATT` para que `off` mande) no lo
+  reanuda. El re-anuncio lo hace `txPoll()` desde el `loop()` —nunca desde el callback del stack— y
+  respeta la radio abajo. Sin eso, `drop` incumple su propio contrato y, peor, un corte del iPhone
+  dejaría al emulador mudo: el gate mediría "iOS no reconecta" cuando la mudez es nuestra.
+- **Antes de decir que un modo anda, flashealo.** Los tres compilaban desde el día uno; dos de los tres
+  no habían arrancado nunca. La sección *"Qué está verificado EN HARDWARE"* existe para eso: se
+  actualiza con lo que se vio por el serie, no con lo que compiló.

@@ -559,7 +559,8 @@ static BLEServer *g_server = nullptr;
 static BLEHIDDevice *g_hid = nullptr;
 static BLECharacteristic *g_input = nullptr;
 static volatile bool g_bleLinked = false;
-static bool g_bleAdvertising = false;
+static bool g_bleAdvertising = false;  // ¿QUEREMOS estar en el aire? (lo baja `off`, no una desconexión)
+static volatile bool g_bleReAdvertise = false;  // pedido de re-anuncio dejado por el callback del stack
 static uint32_t g_hidKeyDelayMs = EMU_HID_DEFAULT_KEY_DELAY_MS;
 static bool g_hidRaw = false;  // tipear la trama completa en vez de solo el EID
 // Terminador TECLEADO: '\n' = Enter, '\t' = Tab, 0 = ninguno. No es un EmuTerm: un teclado no
@@ -595,6 +596,7 @@ class HidServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *) override {
     g_bleLinked = false;
+    g_bleReAdvertise = true;  // el re-anuncio lo hace txPoll(), NO este callback (ver abajo)
     logLine("HID: central DESCONECTADO");
   }
 };
@@ -617,7 +619,15 @@ static void txBegin() {
 
   g_hid = new BLEHIDDevice(g_server);
   g_input = g_hid->inputReport(1);
-  g_hid->manufacturer("RAFAQ");
+  // ⚠️ TRAMPA de BLEHIDDevice (core esp32 3.3.8): el CONSTRUCTOR **no** crea la característica de
+  // fabricante (0x2a29). La crea el getter `manufacturer()` (BLEHIDDevice.cpp:128-130); el setter
+  // `manufacturer(String)` escribe derecho por el puntero (:137-138) y ese miembro no tiene
+  // inicializador (BLEHIDDevice.h:92) → hasta que se llama al getter guarda basura. Llamar al
+  // setter primero desreferencia esa basura: LoadProhibited y boot loop, que es exactamente lo que
+  // tenía este modo (backtrace simbolizado en progress/impl_emulador-hid-crash.md). La forma
+  // correcta es la del ejemplo Server_Gamepad de la propia librería: getter (que CREA) y recién
+  // ahí el valor.
+  g_hid->manufacturer()->setValue("RAFAQ");
   g_hid->pnp(0x02, 0xE502, 0xA111, 0x0210);
   g_hid->hidInfo(0x00, 0x01);
   g_hid->reportMap((uint8_t *)HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
@@ -636,7 +646,27 @@ static bool txLinked() {
   return g_bleLinked;
 }
 
-static void txPoll() {}
+/**
+ * Re-anuncio después de una desconexión.
+ *
+ * En BLE el stack DEJA de anunciarse solo cuando un central se conecta, y `advertiseOnDisconnect(false)`
+ * hace que no vuelva por su cuenta. Sin esto, en cuanto se corta el link el emulador queda invisible
+ * PARA SIEMPRE: `drop` incumpliría su contrato ("sigue visible y emparejado", README §comandos) y —lo
+ * caro— si el iPhone corta el link al mandar la app a background, la medición (d) del gate daría "iOS
+ * no reconecta" cuando la mudez es NUESTRA. Un teclado BLE real vuelve al aire; el emulador tiene que
+ * hacer lo mismo o no emula la cosa que se está midiendo.
+ *
+ * Va en el loop y no en el callback del stack por la misma razón que el `queueAirCommand` del MODO_GATT:
+ * no se reentra al stack BLE desde su propio callback.
+ */
+static void txPoll() {
+  if (!g_bleReAdvertise) return;
+  g_bleReAdvertise = false;
+  // `off` bajó la radio a propósito ("se apagó el bastón"): tiene que SEGUIR desaparecido.
+  if (!g_bleAdvertising) return;
+  BLEDevice::startAdvertising();
+  logLine("HID: de vuelta en el aire (un teclado real se re-anuncia al desconectarse)");
+}
 
 /** ASCII → keycode HID (+ shift). false si un teclado no puede tipear ese byte. */
 static bool hidMapAscii(uint8_t c, HidKey *out) {
@@ -747,7 +777,8 @@ static void txRadioOn() {
 static BLEServer *g_server = nullptr;
 static BLECharacteristic *g_tx = nullptr;
 static volatile bool g_bleLinked = false;
-static bool g_bleAdvertising = false;
+static bool g_bleAdvertising = false;  // ¿QUEREMOS estar en el aire? (lo baja `off`, no una desconexión)
+static volatile bool g_bleReAdvertise = false;  // pedido de re-anuncio dejado por el callback del stack
 static uint16_t g_chunk = EMU_GATT_CHUNK;
 
 class GattServerCallbacks : public BLEServerCallbacks {
@@ -757,6 +788,7 @@ class GattServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *) override {
     g_bleLinked = false;
+    g_bleReAdvertise = true;  // el re-anuncio lo hace txPoll(), NO este callback (ver abajo)
     logLine("GATT: central DESCONECTADO");
   }
 };
@@ -818,7 +850,21 @@ static bool txLinked() {
   return g_bleLinked;
 }
 
-static void txPoll() {}
+/**
+ * Re-anuncio después de una desconexión — misma razón, palabra por palabra, que en el MODO_HID: el
+ * stack deja de anunciarse al conectarse un central y `advertiseOnDisconnect(false)` no lo reanuda,
+ * así que sin esto `drop` dejaría al emulador invisible para siempre y la reconexión —el escenario
+ * que este banco existe para provocar— no se podría probar. Se hace desde el loop, no desde el
+ * callback del stack.
+ */
+static void txPoll() {
+  if (!g_bleReAdvertise) return;
+  g_bleReAdvertise = false;
+  // `off` bajó la radio a propósito ("se apagó el bastón"): tiene que SEGUIR desaparecido.
+  if (!g_bleAdvertising) return;
+  BLEDevice::startAdvertising();
+  logLine("GATT: de vuelta en el aire (drop ≠ desaparecer del aire)");
+}
 
 static size_t txSendRaw(const uint8_t *data, size_t len) {
   if (!txLinked() || g_tx == nullptr) return 0;
