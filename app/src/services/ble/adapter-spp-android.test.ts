@@ -1980,3 +1980,80 @@ test('🟠-B: el mismo target explícito con el latch tomado tampoco es mudo', a
   await first;
   assert.equal(nativeState.connectCalls.length, 1, 'y sigue sin abrir dos sockets');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// El identificador del bastón NO viaja en el free-text de un log (§7.2 del Gate 2 de `ios-ble-mfi`)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// El SPP no usa `react-native-ble-plx`, pero tiene EXACTAMENTE la misma clase, y desde antes del
+// baseline: `Exceptions.java` de `react-native-bluetooth-classic` arma sus mensajes con
+// `String.format`, y el `%s` es `device.getAddress()` — 'Connection to %s failed.', 'Connection to %s
+// was lost', 'Not connected to %s', 'Unable to complete pairing with %s'. El `errorMessage(e)` que
+// había devolvía ese texto crudo a `liveness_lost` y a `logBridgeFailure`, o sea LA MAC a los
+// breadcrumbs, en free-text (donde el scrubber por claves no llega).
+
+/** Los eventos logueados, enteros (el helper de arriba se queda con el `kind`). */
+async function capturarEventos(fn: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.info;
+  // eslint-disable-next-line no-console
+  console.info = (...args: unknown[]) => {
+    if (args[0] === '[ble]') lines.push(String(args[2]));
+  };
+  try {
+    await fn();
+  } finally {
+    // eslint-disable-next-line no-console
+    console.info = original;
+  }
+  return lines;
+}
+
+/** Los `message` (free-text) de los eventos. Los CAMPOS con clave no entran acá a propósito. */
+function mensajesDe(logs: string[]): string[] {
+  const out: string[] = [];
+  for (const line of logs) {
+    const ev = JSON.parse(line) as { message?: unknown };
+    if (typeof ev.message === 'string') out.push(ev.message);
+  }
+  return out;
+}
+
+test('§7.2: la sonda que rechaza con la MAC adentro no la manda al log (y la causa sobrevive)', async () => {
+  const { native } = fakeNative({ livenessRejects: new Error(`Not connected to ${MAC}`) });
+  const { env, state } = fakeEnv({ native });
+  const adapter = new SppAndroidAdapter(RS420_DRIVER, env);
+  const { statuses } = track(adapter);
+  await adapter.connect(MAC);
+
+  state.foreground = false;
+  const logs = await capturarEventos(async () => {
+    state.resumeForeground();
+    await flush();
+  });
+
+  assert.equal(statuses.at(-1), 'scanning', 'fail-closed intacto: el comportamiento no cambia');
+  const msgs = mensajesDe(logs);
+  assert.ok(msgs.length > 0, 'sin mensajes esto sería un verde vacío');
+  assert.deepEqual(msgs.filter((m) => m.includes(MAC)), [], 'la MAC no puede estar en ningún `message`');
+  assert.ok(
+    msgs.some((m) => m.includes('Not connected to <device>')),
+    'se blanquea el identificador, NO el motivo',
+  );
+});
+
+test('§7.2 (la CLASE): el connect que falla con el mensaje del nativo tampoco filtra la MAC', async () => {
+  // `ConnectionFailedException` → `Exceptions.CONNECTION_FAILED.message(device.getAddress())`.
+  const { native } = fakeNative({ connectRejects: new Error(`Connection to ${MAC} failed.`) });
+  const { env } = fakeEnv({ native });
+  const adapter = new SppAndroidAdapter(RS420_DRIVER, env);
+  track(adapter);
+  const logs = await capturarEventos(async () => {
+    await adapter.connect(MAC);
+    await flush();
+  });
+  const msgs = mensajesDe(logs);
+  assert.ok(msgs.length > 0);
+  assert.deepEqual(msgs.filter((m) => m.includes(MAC)), []);
+  assert.ok(msgs.some((m) => m.includes('connect_path') && m.includes('Connection to <device> failed.')));
+});

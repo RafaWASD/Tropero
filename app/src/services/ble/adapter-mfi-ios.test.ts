@@ -1414,3 +1414,71 @@ test('R7/RBM9.5: ningún camino de este adapter TIRA — una falla es un estado,
   }
   await wait(1);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// El identificador del accesorio NO viaja en el free-text de un log (§7.2 del Gate 2)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Acá el identificador es el SERIAL del accesorio (`accessory.serialNumber`), que NO tiene forma
+// reconocible: ninguna regex lo distingue de cualquier otra palabra del mensaje. Por eso el arreglo de
+// este transporte no puede ser por forma —el único que puede sacarlo del texto es el call site que sabe
+// cuál era—, y por eso `verifyLiveness` y el `catch` del connect le pasan su `target` a `safeErrorText`.
+// El módulo nativo todavía no existe (RBM4.2): esto entra ANTES de que haya un mensaje del que
+// arrepentirse, que es la única vez que sale barato.
+
+/** Los `message` (free-text) de los eventos. Los CAMPOS con clave no entran acá a propósito. */
+function mensajesDe(logs: string[]): string[] {
+  const out: string[] = [];
+  for (const line of logs) {
+    const ev = JSON.parse(line) as { message?: unknown };
+    if (typeof ev.message === 'string') out.push(ev.message);
+  }
+  return out;
+}
+
+test('§7.2: la sonda que rechaza con el SERIAL adentro no lo manda al log (y la causa sobrevive)', async () => {
+  const { e, seen } = await connected({
+    nativeOpts: {
+      livenessRejects: { code: 'session_lost', message: `EASession for ${SERIAL_A} was closed` },
+    },
+    envOpts: { timeouts: { ...NO_TIMEOUTS, livenessPoll: 1_000 }, clock: CLOCK_START },
+  });
+  const logs = await withLogs(async () => {
+    e.state.fire('watchdog');
+    await flush();
+  });
+  assert.equal(seen.statuses.at(-1), 'scanning', 'fail-closed intacto');
+  const msgs = mensajesDe(logs);
+  assert.ok(msgs.length > 0, 'sin mensajes esto sería un verde vacío');
+  assert.deepEqual(msgs.filter((m) => m.includes(SERIAL_A)), [], 'el serial no puede estar en un `message`');
+  assert.ok(
+    msgs.some((m) => m.includes('EASession for <device> was closed')),
+    `se blanquea el identificador, NO el motivo: ${msgs.join(' | ')}`,
+  );
+});
+
+test('§7.2: el connect que falla con el serial en el mensaje del nativo tampoco lo filtra', async () => {
+  const profile = DRIVER_PROFILES[0];
+  const n = fakeNative({
+    deviceAddress: profile.serial,
+    connectRejects: {
+      code: 'connection_failed',
+      message: `Could not connect to EAAccessory ${profile.serial}`,
+    },
+  });
+  const m = fakeModuleEnv({ native: n.native });
+  const e = fakeEnv({ moduleEnv: m.env, declared: [profile.protocolString] });
+  const adapter = new MfiIosAdapter(profile.driver, e.env);
+  track(adapter);
+  const logs = await withLogs(async () => {
+    await adapter.connect(profile.serial);
+    await flush();
+  });
+  const msgs = mensajesDe(logs);
+  assert.ok(msgs.length > 0);
+  assert.deepEqual(msgs.filter((mm) => mm.includes(profile.serial)), []);
+  assert.ok(
+    msgs.some((mm) => mm.includes('connect_path') && mm.includes('Could not connect to EAAccessory <device>')),
+    `la causa (y su clasificación) tienen que seguir estando: ${msgs.join(' | ')}`,
+  );
+});

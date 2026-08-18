@@ -407,6 +407,52 @@ El orden **no es una preferencia**: cada fase existe donde está porque la anter
       hallazgo del meta-guard de cobertura sobre `ble/logging.ts`, que queda como recomendación al leader).
       Cubre: RBM7.x (mismo patrón `impl_13`).
 
+
+## Fase F5-followup — los DOS hallazgos §7 que el fix-loop dejó fuera de alcance
+
+> Entrada: `progress/impl_ios-ble-mfi-gate2-fix.md` §7. Informe:
+> `progress/impl_ios-ble-mfi-gate2-followup.md`. El leader decidió el camino de cada uno antes de
+> despachar. Alcance cerrado a los dos hallazgos: **no** se empezó F6 ni F7, no se commiteó.
+
+- [x] **TG.1** — §7.1: `utils/scan-coverage.ts` gana una allowlist **compartida** (`SCAN_COVERAGE_ALLOW`)
+      con **UNA** entrada —`src/services/ble/logging.ts`— y el motivo escrito **en el lugar**. La exención
+      pasa a ser **por chequeo**: exime del piso de retención y el balance de llaves **le sigue corriendo**
+      (antes el `allow` era un `continue` que sacaba el archivo del escaneo). Cubre: RBM9.10.
+- [x] **TG.2** — §7.1: `utils/scan-coverage.test.ts` (nuevo) — **el freno** de la allowlist: motivo
+      sustantivo y no un puntero, tope de entradas, el archivo eximido existe, la exención está **GANADA**
+      contra el árbol real (si sobra, rojo), la exención es **angosta** en las dos direcciones, la puerta es
+      **UNA** (ningún guard pasa `allow` inline — verificado sobre `app/app` + `app/src` **y la raíz de
+      `app/`**) y todos los guards calculan el **mismo label**. Cierra con **la demostración**: el mutante de
+      dos líneas sobre el archivo real, medido CON y SIN la entrada. Cubre: RBM9.10.
+- [x] **TG.3** — §7.2: `services/ble/error-text.ts` (nuevo) — `safeErrorText(e, deviceId?)`: `errorCode:<n>`
+      cuando el código interpola `{deviceID}`, y si no el mensaje con el id exacto y las MAC blanqueados a
+      `<device>`, acotado a 240 caracteres. Cubre: RBM9.9.
+- [x] **TG.4** — §7.2: **los tres adapters**. Se borran los tres `errorMessage(e)` locales (las tres copias
+      devolvían `e.message` crudo) y todos los call sites pasan por `safeErrorText`; los que conocen el
+      device se lo pasan (`verifyLiveness` ×3, `ble_monitor_lost`, `ble_disconnected`, `connect_path` ×3 y
+      `logBridgeFailure` con un cuarto parámetro opcional). El `let target` del MFi se declara **fuera del
+      `try`** para que el `catch` pueda blanquear el serial. Cubre: RBM9.9.
+- [x] **TG.5** — §7.2: `error-text.test.ts` (nuevo, 12 tests). El principal **DERIVA** de
+      `node_modules/react-native-ble-plx` la lista de códigos cuya plantilla interpola `{deviceID}` y exige
+      que la tabla declarada la contenga —una tabla copiada a mano se pudre, y esa es la lección del union
+      `RejectReason`—; el resto cubre las dos vías, los controles negativos (un UUID de servicio NO se
+      blanquea, un mensaje sin id NO se degrada) y el tope. Cubre: RBM9.9.
+- [x] **TG.6** — §7.2: `log-device-identifier-guard.test.ts` (nuevo) — el **guard sobre la ausencia**, con
+      sus tres reglas, su anti-vacuidad (dispara sobre el cuerpo VIEJO) y su control de falsos positivos
+      (no dispara sobre lo que hoy es correcto). Declara lo que NO cubre. Cubre: RBM9.9.
+- [x] **TG.7** — §7.2: barrido de **comportamiento** en las tres suites de adapter (4 tests en `ble-gatt`,
+      2 en `spp-android`, 2 en `mfi-ios`): con un error de la lib que interpola el id, ningún `message` de
+      ningún evento lo lleva — y la causa sigue estando (`errorCode:201`, `Connection to <device> failed.`).
+      Uno es un barrido de **clase** sobre un flujo entero, no una lista de eventos. Cubre: RBM9.9.
+- [x] **TG.8** — Falsificación: **13 mutantes**, todos con el desenlace esperado (M1 verde a propósito: es
+      la dirección "con la entrada NO rompe"), control positivo sin mutar en verde y árbol restaurado byte a
+      byte contra backup propio. Detalle en el informe. Cubre: RBM9.9, RBM9.10.
+- [x] **TG.9** — `run-tests.mjs`: registrar los tres tests nuevos. ⚠️ Archivo compartido: se verificó que el
+      bloque de **rebrand fase 5** y el de `stage-runner` siguieran intactos y en verde (77/77). Cubre: todas.
+- [x] **TG.10** — Reconciliación de specs: **RBM9.9** y **RBM9.10** nuevos, nota de reconciliación bajo
+      **RBM5.13** (de la instancia a la clase), cierre del pendiente que §4.1 del design había dejado
+      abierto, y `design-ios-ble-mfi.md` **§4.2** con el as-built completo. Cubre: RBM7.x (patrón `impl_13`).
+
 ## Fase F6 — T5: banco del emulador en `MODO_GATT` (device)
 
 - [ ] **T6.1** — Flashear el ESP32 con `-DEMU_MODE=MODO_GATT`; verificar con `selftest` y `status`; renombrarlo con `name` para ejercitar **reconocido** (`EMU-GATT-STICK`) y **no reconocido**. Cubre: RBM6.1, RBM5.13.
@@ -467,7 +513,7 @@ El orden **no es una preferencia**: cada fase existe donde está porque la anter
 | RBM4.1–RBM4.9 | T5.1–T5.6, T2.2, T2.3, T4.2 |
 | RBM5.1–RBM5.10 | T4.1, T4.2, T4.5, T4.6, T4.7, **T4.11 + T4.12** (RBM5.6/RBM5.7: el camino de escritura de la preferencia y su guard de alcanzabilidad) |
 | RBM5.11 | T4.3 (contraparte: **no** se registra el HR5 v3) |
-| RBM5.12, RBM5.13 | T4.3, T4.4, **TF.5** (MEDIUM-2: el log no lleva el id del device ajeno) |
+| RBM5.12, RBM5.13 | T4.3, T4.4, **TF.5** (MEDIUM-2: el log no lleva el id del device ajeno), **TG.6** (y ahora un guard estático lo vigila) |
 | RBM5.14 | T4.8, T4.9, **T4.11** (elegir → conectar, con granularidad de transporte) |
 | RBM6.1–RBM6.6 | T6.1–T6.5 |
 | RBM7.1–RBM7.6 | T8.1–T8.6, T7.1.4 |
@@ -480,6 +526,8 @@ El orden **no es una preferencia**: cada fase existe donde está porque la anter
 | RBM9.3–RBM9.6 | T8.9 |
 | RBM9.7 | T6.6, T8.11 |
 | RBM9.8 | T2.8, T6.4 |
+| **RBM9.9** | **TG.3, TG.4, TG.5, TG.6, TG.7, TG.8** |
+| **RBM9.10** | **TG.1, TG.2, TG.8** |
 
 ## Qué queda GATED al cerrar el delta (para que no se lea como olvido)
 

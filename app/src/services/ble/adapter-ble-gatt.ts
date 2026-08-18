@@ -103,6 +103,7 @@ import {
   type BluetoothPermissionOutcome,
 } from './permissions-android';
 import { logTransportEvent } from './logging';
+import { safeErrorText } from './error-text';
 
 // ── Superficie de `react-native-ble-plx` que usamos, MODELADA LOCALMENTE ─────────────────────────
 // Se modela a mano (y no se importan sus tipos) por el mismo motivo que en el SPP: no meter la lib en
@@ -286,7 +287,7 @@ const REAL_BLE_MODULE_ENV: BleModuleEnv = {
       }
       return new mod.BleManager();
     } catch (e) {
-      logTransportEvent({ kind: 'connect_error', message: `ble_manager_load_failed: ${errorMessage(e)}` });
+      logTransportEvent({ kind: 'connect_error', message: `ble_manager_load_failed: ${safeErrorText(e)}` });
       return null;
     }
   },
@@ -378,19 +379,12 @@ export function __resetBleModuleStateForTests(env?: BleModuleEnv): void {
 
 // ─── Helpers puros de este módulo ────────────────────────────────────────────────────────────────
 
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === 'string') return e;
-  if (e != null && typeof e === 'object') {
-    const msg = (e as { message?: unknown }).message;
-    if (typeof msg === 'string') return msg;
-    // Los errores de `react-native-ble-plx` son `BleError` con `errorCode` numérico; si el mensaje no
-    // vino, el código es lo único que distingue "radio apagada" de "device desconectado".
-    const code = (e as { errorCode?: unknown }).errorCode;
-    if (code != null) return `errorCode:${String(code)}`;
-  }
-  return 'unknown';
-}
+// ⚠️ ACÁ HABÍA UN `errorMessage(e)` PROPIO (uno por adapter, tres copias) que devolvía `e.message`
+// crudo. Los mensajes de `react-native-ble-plx` interpolan el id del dispositivo ('Device {deviceID} was
+// disconnected'), así que ese string mandaba la MAC del bastón a los breadcrumbs de Sentry, en free-text,
+// donde el scrubber por claves no llega (§7.2 del Gate 2 de este delta). El convertidor ahora es UNO
+// —`safeErrorText` de `error-text.ts`— y `log-device-identifier-guard.test.ts` pone en rojo al que
+// vuelva a leer el texto de un error por su cuenta desde un archivo que loguea.
 
 /**
  * Log uniforme de un await del puente que falló o venció, con dos kinds distintos a propósito: hay que
@@ -399,9 +393,9 @@ function errorMessage(e: unknown): string {
  * `withTimeout` que lo envolvió). Copia deliberada del helper del SPP: son dos archivos con el mismo
  * borde y compartirlo obligaría a exportar ruido desde un adapter hacia el otro.
  */
-function logBridgeFailure(label: string, ms: number, error: unknown): void {
+function logBridgeFailure(label: string, ms: number, error: unknown, deviceId?: string | null): void {
   if (isBridgeTimeout(error)) logTransportEvent({ kind: 'bridge_timeout', label: error.label, ms: error.ms });
-  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${errorMessage(error)}` });
+  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${safeErrorText(error, deviceId)}` });
 }
 
 function timeoutOf(env: Pick<BleEnv, 'timeouts'>, key: keyof BleTimings): number {
@@ -1068,7 +1062,7 @@ export class BleGattAdapter implements StickAdapter {
             // desde acá en adelante NO van a llegar notificaciones — el link seguiría "conectado" y
             // estructuralmente SORDO, que es el peor de los estados (el operario bastonea y no pasa
             // nada, sin un solo indicio). Se trata como pérdida del stream: teardown + backoff.
-            logTransportEvent({ kind: 'read_loop_error', message: `ble_monitor_lost: ${errorMessage(error)}` });
+            logTransportEvent({ kind: 'read_loop_error', message: `ble_monitor_lost: ${safeErrorText(error, target)}` });
             void this.loseLink('monitor_error');
             return;
           }
@@ -1107,7 +1101,7 @@ export class BleGattAdapter implements StickAdapter {
         if (typeof id === 'string' && id.length > 0 && !this.sameDevice(id, target)) return;
         logTransportEvent({
           kind: 'connect_error',
-          message: `ble_disconnected: ${error != null ? errorMessage(error) : 'sin_error'}`,
+          message: `ble_disconnected: ${error != null ? safeErrorText(error, target) : 'sin_error'}`,
         });
         void this.loseLink('os_event');
       });
@@ -1126,7 +1120,7 @@ export class BleGattAdapter implements StickAdapter {
       // Falla de conexión → no bloquea el manual (R7); reintenta con backoff (foreground-only, RBM3.6).
       // El label es del TRAMO; si el error fue un vencimiento, `logBridgeFailure` usa el label del await
       // que se perdió, que es más preciso que cualquier cosa que pueda decir acá.
-      logBridgeFailure('connect_path', this.ms('connect'), e);
+      logBridgeFailure('connect_path', this.ms('connect'), e, target);
       this.emitStatus('disconnected');
       this.scheduleReconnect();
     }
@@ -1189,7 +1183,7 @@ export class BleGattAdapter implements StickAdapter {
         (error, device) => {
           if (settled) return;
           if (error != null) {
-            logTransportEvent({ kind: 'connect_error', message: `ble_scan_error: ${errorMessage(error)}` });
+            logTransportEvent({ kind: 'connect_error', message: `ble_scan_error: ${safeErrorText(error)}` });
             finish(null);
             return;
           }
@@ -1377,7 +1371,7 @@ export class BleGattAdapter implements StickAdapter {
     try {
       alive = await withTimeout(manager.isDeviceConnected(deviceId), this.ms('call'), 'is_device_connected');
     } catch (e) {
-      why = errorMessage(e);
+      why = safeErrorText(e, deviceId);
     }
     // Mientras sondeábamos pudo pasar cualquier cosa (un disconnect, otro connect): no pisamos.
     if (this.closed || this.session !== session || this.inFlightGen != null) return;

@@ -15,7 +15,7 @@ para retomar sin releer todo. **Fuente de verdad de QUÉ hacer**: `requirements-
 | **F2** | `react-native-ble-plx@3.5.1` + config + permisos + veto | ✅ **commiteada `3272227`** | Veto **FIRME**: `assembleDebug` local BUILD SUCCESSFUL 3m23s, **0 EAS**. `progress/veto_ble-plx.md` |
 | **F3** | `adapter-ble-gatt` | ✅ **commiteada `a9d81ff`** | review CHANGES_REQUESTED (🟠-1: fixtures con un solo juego de parámetros) → fix-loop → **re-falsificado por el leader**: quitarle el delimitador al driver **cae**. 17 mutantes, 17 muertos |
 | **F4** | Selección/prioridad + driver del emulador | ✅ **commiteada `54b72f8`** | review CHANGES_REQUESTED (2 🟠: iOS construía el manager en el arranque contra lo que el comentario afirmaba · `ble-gatt` inalcanzable en Android por falta de escritor) → fix-loop → **re-falsificado por el leader**: el mutante eager mata el test que lo nombra |
-| **F5** | `adapter-mfi-ios` prearmado | 🔄 **a medias, 3er agente caído** | **Sin commitear.** `tsc` rc=0, **173 pasan / 10 fallan** — y los 10 son **los guards de F4 haciendo su trabajo**. Ver §F5 al final |
+| **F5** | `adapter-mfi-ios` prearmado | ✅ **commiteada `7f4a0bf`** | El hallazgo más grave de la unidad: **RBM4.7 era FALSO con la suite entera en verde** — `getBondedDevices()` no copia `protocolStrings`, así que MFi habría seguido muerto el día que llegara la cadena. Re-falsificado por el leader: revertir rompe 10 tests |
 | **F6** | Banco ESP32 en `MODO_GATT`, en device | ⏳ pendiente | Android local; **iOS necesita OK de build de Raf** |
 | **F7** | Adapter HID | ⏳ **condicional**: solo si F0 da verde | — |
 | **F8** | Reconciliación + Gate 2 + cierre | ⏳ pendiente | ADR-024 ya enmendado (adelantado por el leader) |
@@ -168,3 +168,38 @@ sin terminar de cablearlo.
 ⚠️ **Al cerrar F5, la regla de F4 sigue valiendo**: un test viejo solo se reescribe si la spec cambió ese
 comportamiento a propósito, **citando el `RBM<n>` que lo autoriza**. Los que son guards de alcance
 (`🟠-2`, `🟡-3`) **no se aflojan**: se satisfacen cableando lo que falta.
+
+## Gate 2 (security_analyzer, modo code) — FAIL → cerrado en `fae4f53`
+
+**El HIGH no estaba en el código nuevo, y eso es la lección.** `line-framer.ts` acumulaba sin cota y **ese
+archivo no lo tocó el delta**: lo que cambió es **quién lo alimenta**. Tenía un solo call site de producción
+(web-serial, en web, detrás del gesto obligatorio de `requestPort()`); el adapter BLE lo puso **sobre una
+radio que auto-conecta sin gesto**.
+
+Tres reviews adversariales anteriores no lo vieron porque las tres miraron **los archivos del changeset**.
+→ Pregunta que hay que agregar a toda review de una unidad que suma un consumidor o un transporte:
+**"¿qué código que NO tocamos quedó expuesto a algo nuevo?"**
+
+Agravantes que sólo se ven mirando el flujo: las defensas las **reseteaba el propio flujo** (cada chunk
+refrescaba `lastDataAt`, y el chequeo de liveness pregunta si el device está conectado — el que inunda
+**está** conectado). Y el disparador realista no es un atacante: **un lector con otro terminador**, el
+BENCH-2 que ya se pagó en el SPP.
+
+**Falsificación del leader, más fuerte que un test en rojo**: con el tope, 12/12 en <1 s; **sin el tope la
+suite NO TERMINA** (timeout a los 7 min) — que es el síntoma de producción, no una metáfora.
+
+**Lo que el Gate 2 verificó y quedó limpio** (no repetirlo): camino del EID, multi-tenant, Gate 1 N/A
+cruzado por commit contra `--untracked-files=all`, manifiesto **mergeado** sin ubicación sin tope, sin
+background BLE, clave del plist vacía con su guard vivo.
+
+### Dos decisiones del leader sobre los §7 (en curso)
+
+- **7.1 — allowlist del meta-guard, NO purgar prosa.** `ble/logging.ts` está a **2 líneas** de poner en rojo
+  **9 guards**. Es un catálogo donde **la prosa ES el artefacto**; borrarla para satisfacer una heurística de
+  cobertura optimiza la métrica **contra su propósito**. Estrena una allowlist vacía → va con entrada
+  angosta, motivo en el lugar, y **guard sobre la propia allowlist** para que no se vuelva la salida de
+  emergencia de todos.
+- **7.2 — `errorCode:<n>` en vez del `message` crudo, barriendo la CLASE** (`ble-gatt` + `spp-android` +
+  `mfi-ios`). Los mensajes de `ble-plx` interpolan el id del device, así que la MAC de **nuestro** bastón
+  llega a los breadcrumbs. Precio aceptado y dicho: **se pierde legibilidad del log**, no diagnóstico (los
+  códigos mapean 1:1 con las plantillas).

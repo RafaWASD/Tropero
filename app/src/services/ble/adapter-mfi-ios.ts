@@ -118,6 +118,7 @@ import {
   type ConnectTrigger,
 } from './connect-trigger';
 import { logTransportEvent } from './logging';
+import { safeErrorText } from './error-text';
 
 // ── Superficie de la rama iOS de `react-native-bluetooth-classic` que usamos (modelada localmente: la
 //    lib no se importa por tipo, para no meterla en el grafo de módulos de web/CI) ──────────────────
@@ -220,7 +221,7 @@ const REAL_MFI_MODULE_ENV: MfiModuleEnv = {
       }
       return native;
     } catch (e) {
-      logTransportEvent({ kind: 'connect_error', message: `mfi_module_load_failed: ${errorMessage(e)}` });
+      logTransportEvent({ kind: 'connect_error', message: `mfi_module_load_failed: ${safeErrorText(e)}` });
       return null;
     }
   },
@@ -289,17 +290,10 @@ export function __resetMfiModuleStateForTests(env?: MfiModuleEnv): void {
 
 // ─── Helpers puros de este módulo ────────────────────────────────────────────────────────────────
 
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === 'string') return e;
-  if (e != null && typeof e === 'object') {
-    const msg = (e as { message?: unknown }).message;
-    if (typeof msg === 'string') return msg;
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return 'unknown';
-}
+// ⚠️ ACÁ HABÍA UN `errorMessage(e)` PROPIO que devolvía `e.message` crudo. En MFi el identificador
+// es el SERIAL del accesorio, que no tiene forma reconocible: por eso los call sites que lo conocen se lo
+// pasan a `safeErrorText` (`error-text.ts`), que blanquea la cadena exacta. El módulo nativo todavía no
+// existe, así que esto entra ANTES de que haya un mensaje del que arrepentirse (§7.2 del Gate 2).
 
 /**
  * Compara identificadores de accesorio de forma tolerante. En iOS el id es `accessory.serialNumber` (no
@@ -333,9 +327,9 @@ function eventAccessoryId(event: unknown): string | null {
  * envolvió). Copia deliberada del helper del SPP y del BLE: son tres archivos con el mismo borde y
  * compartirlo obligaría a exportar ruido de un adapter a otro.
  */
-function logBridgeFailure(label: string, ms: number, error: unknown): void {
+function logBridgeFailure(label: string, ms: number, error: unknown, deviceId?: string | null): void {
   if (isBridgeTimeout(error)) logTransportEvent({ kind: 'bridge_timeout', label: error.label, ms: error.ms });
-  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${errorMessage(error)}` });
+  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${safeErrorText(error, deviceId)}` });
 }
 
 function timeoutOf(env: Pick<MfiEnv, 'timeouts'>, key: keyof BridgeTimings): number {
@@ -715,11 +709,15 @@ export class MfiIosAdapter implements StickAdapter {
     if (gen !== this.connectGeneration) return;
 
     this.emitStatus('connecting');
+    // ⚠️ DECLARADO FUERA DEL `try` a propósito: el `catch` necesita el accesorio que estábamos
+    // intentando para poder BLANQUEARLO del texto del error (§7.2 del Gate 2). El serial de un accesorio
+    // MFi no tiene forma reconocible, así que el único que puede sacarlo del mensaje del nativo es el
+    // call site que sabe cuál era.
+    let target = remembered;
     try {
       // Sin accesorio conocido hay que LISTAR: en iOS no existe el descubrimiento (hallazgo 1), los
       // accesorios los empareja el SO y lo único que podemos hacer es filtrar los prendidos por la cadena
       // de protocolo del driver.
-      let target = remembered;
       if (!target) {
         const bonded = await withTimeout(
           native.getBondedDevices(),
@@ -862,7 +860,7 @@ export class MfiIosAdapter implements StickAdapter {
       // (`mfiConnectRetryPolicy`): la cadena de protocolo que este build no declara no se arregla
       // martillando la radio, mientras que un accesorio apagado o la radio abajo sí pueden cambiar solos.
       const failure = classifyMfiConnectError(e);
-      logBridgeFailure(`connect_path:${failure}`, this.ms('connect'), e);
+      logBridgeFailure(`connect_path:${failure}`, this.ms('connect'), e, target);
       this.emitStatus('disconnected');
       if (mfiConnectRetryPolicy(failure) === 'retry') this.scheduleReconnect();
     }
@@ -956,7 +954,7 @@ export class MfiIosAdapter implements StickAdapter {
     try {
       alive = await withTimeout(native.isDeviceConnected(address), this.ms('call'), 'is_device_connected');
     } catch (e) {
-      why = errorMessage(e);
+      why = safeErrorText(e, address);
     }
     // Mientras sondeábamos pudo pasar cualquier cosa (un disconnect, otro connect): no pisamos.
     if (this.closed || this.session !== session || this.inFlightGen != null) return;

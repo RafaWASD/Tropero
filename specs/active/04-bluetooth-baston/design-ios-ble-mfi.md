@@ -392,9 +392,72 @@ interpolado en una oración. Complemento (defensa en profundidad, no la defensa 
    `src/services/ble/logging.ts`". Las alternativas eran purgar prosa de otras unidades de ese archivo o
    estrenar la allowlist del meta-guard (hoy vacía, y sería la primera): las dos son decisiones que no le
    corresponden a un fix-loop. **Queda como recomendación al leader** (ver el informe).
+   **CERRADO en §4.2**: el leader eligió la allowlist (no purgar prosa) y se estrenó con su freno. A
+   partir de ahí el union **puede** crecer, y el kind propio dejó de estar bloqueado por esto (no se
+   cambió igual: la forma de sub-evento sigue siendo la correcta para esta familia).
 2. **`connected_silent` no cambió de forma ni de significado**, así que `adapter-spp-android` y
    `adapter-mfi-ios` **no se tocaron**. En esos dos el framing lo hace el nativo y `splitSppPayload` no
    acumula: byte y trama son el mismo evento y la distinción no tendría qué medir.
+
+
+### 4.2 As-built del follow-up del Gate 2 (2026-08-17) — el identificador fuera del texto, y la allowlist con freno
+
+Informe: `progress/impl_ios-ble-mfi-gate2-followup.md`. Cierra los **dos hallazgos §7** que el fix-loop
+anterior había dejado fuera de alcance (RBM9.9 y RBM9.10). **No toca la máquina de estados de ningún
+transporte**: cambia de dónde sale el TEXTO de un log, y arregla un meta-guard del repo.
+
+**(a) `services/ble/error-text.ts` — UN convertidor error→texto, y los tres adapters lo usan (RBM9.9).**
+
+```
+safeErrorText(e, deviceId?)
+  ├─ errorCode numérico ∈ BLE_PLX_DEVICE_ID_ERROR_CODES  → `errorCode:<n>`     (el mensaje NO se mira)
+  └─ resto → rawErrorText(e)                             → scrub → tope 240
+                 message | string | code | errorCode:<n> | 'unknown'
+        scrub = el `deviceId` EXACTO que el call site conocía (case-insensitive, ≥ 6 chars)
+              + cualquier MAC (` hh([:-]hh){5} `)                        → `<device>`
+```
+
+Los tres `errorMessage(e)` locales (uno por adapter, tres copias, las tres devolvían `e.message` crudo)
+**se borraron**; en su lugar quedó un comentario que dice qué había y por qué se fue. Los call sites que
+conocen el device se lo pasan: `verifyLiveness` (los tres), el `ble_monitor_lost` y el `ble_disconnected`
+del GATT, y el `connect_path` de los tres —para eso el `let target` del MFi se **declaró fuera del
+`try`**, que es el único cambio de estructura del follow-up—. `logBridgeFailure` acepta un cuarto
+parámetro opcional con el mismo fin.
+
+**Por qué la tabla de códigos y no solo el blanqueo por forma**: el id de iOS es un **UUID**, y por forma
+es indistinguible de un UUID de servicio o de característica (que sí queremos ver en el log). Ninguna
+regex puede separarlos. El código sí, y mapea 1:1 con la plantilla. **Y por qué el blanqueo además de la
+tabla**: el SPP y el MFi no tienen códigos de `ble-plx` — el primero interpola la MAC (que **sí** tiene
+forma) y el segundo el **serial del accesorio** (que no tiene ninguna), y ese último solo lo puede sacar
+el call site que sabía cuál era.
+
+**Lo que a propósito NO se blanquea**, porque blanquear de más también rompe el diagnóstico: los UUID de
+servicio/característica, y los mensajes sin identificador (`'BluetoothLE is powered off'` sale entero).
+
+**(b) El guard sobre la ausencia** (`log-device-identifier-guard.test.ts`): enumera las superficies que
+llaman a `logTransportEvent` (hoy 6) y exige que **ninguna** lea el texto de un error por su cuenta, que
+ninguna **nombre** un identificador en la expresión de un `message` (interpolado **o concatenado**), y que
+`error-text.ts` sea el único convertidor de `services/ble/`. El **campo con clave** sigue siendo legal
+(`connect_superseded { deviceId }`): ese sí lo alcanza el scrubber de `redact.ts`. Declara lo que no
+cubre (un texto armado en otro archivo y logueado por variable: eso es data flow) y esa mitad la cubre el
+barrido de **comportamiento** de las tres suites de adapter, que mira los eventos emitidos.
+
+**(c) La allowlist del meta-guard, estrenada con freno (RBM9.10).** `assertScanCoverage` gana una
+allowlist **compartida** (`SCAN_COVERAGE_ALLOW`) con **una** entrada —`src/services/ble/logging.ts`, motivo
+escrito en el lugar— y la exención pasa a ser **por chequeo**: exime del piso de retención y el balance de
+llaves le sigue corriendo (antes era un `continue` que sacaba el archivo del escaneo). Una entrada alcanza
+para los once guards porque todos calculan el mismo `label`, y **hay un test que lo exige**.
+
+El freno vive en `utils/scan-coverage.test.ts`: motivo sustantivo (≥ 200 caracteres, y que no arranque
+con un puntero), tope de entradas, el archivo tiene que existir, la exención tiene que estar **GANADA**
+contra el árbol real —si el archivo dejó de violar el chequeo, la entrada sobra y se pone roja— y la
+puerta es **una** (la opción `allow` del call site queda **solo para este test**, que la necesita para
+medir con y sin la entrada; ningún guard de producción la pasa, y hay un test que lo verifica sobre
+`app/app` + `app/src` **y la raíz de `app/`**, donde ya viven dos guards).
+
+Medición que cierra el caso, en las dos direcciones: con dos miembros de una línea agregados al union y
+**sin** la entrada caen **10 de 11** guards; **con** la entrada, **0 de 11**. (El que se salva sin la
+entrada es `phone-field`, cuya raíz de escaneo no llega a ese archivo.)
 
 ## 5. T3 — `adapter-mfi-ios` y su gate
 

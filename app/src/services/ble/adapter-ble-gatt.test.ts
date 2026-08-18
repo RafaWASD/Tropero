@@ -2244,3 +2244,123 @@ test('los presupuestos por defecto son los del puente + el del escaneo (y son po
     'un escaneo no puede durar más que un par de intentos de conexión',
   );
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// L. El identificador del bastón NO viaja en el free-text de un log (§7.2 del Gate 2)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//
+// Los mensajes de `react-native-ble-plx` se arman interpolando el id del dispositivo
+// (`BleError.js`: 'Device {deviceID} was disconnected', '… connection failed', 'Services discovery
+// failed for device {deviceID}'). Con el `errorMessage(e)` que había —`e.message` crudo— eso llegaba
+// a los breadcrumbs de Sentry adentro de `message`, que es free-text: ahí el scrubber por claves de
+// `observability/redact.ts` no puede llegar aunque tenga la clave. El id de Android es LA MAC.
+
+/** Un `BleError` como lo construye la lib: mensaje YA interpolado + `errorCode`, sin `deviceID` adentro. */
+function bleError(errorCode: number, message: string): Error & { errorCode: number } {
+  return Object.assign(new Error(message), { errorCode });
+}
+
+/** Los `message` (free-text) de los eventos logueados. Los CAMPOS con clave no entran acá a propósito. */
+function mensajes(logs: string[]): string[] {
+  const out: string[] = [];
+  for (const line of logs) {
+    const ev = JSON.parse(line) as { message?: unknown };
+    if (typeof ev.message === 'string') out.push(ev.message);
+  }
+  return out;
+}
+
+test('§7.2: la desconexión con un `BleError` de la lib NO deja la MAC en el log (y dice qué pasó)', async () => {
+  const { d, seen } = await connected();
+  const logs = await withLogs(async () => {
+    d.emitDisconnected(DEV_ID, bleError(201, `Device ${DEV_ID} was disconnected`));
+    await flush();
+  });
+  assert.ok(seen.statuses.includes('disconnected'), 'el comportamiento no cambia: sigue cortando');
+  const msgs = mensajes(logs);
+  assert.ok(msgs.length > 0, 'sin mensajes esto sería un verde vacío');
+  assert.deepEqual(
+    msgs.filter((m) => m.includes(DEV_ID)),
+    [],
+    'la MAC del bastón no puede aparecer en el free-text de ningún evento',
+  );
+  assert.ok(
+    msgs.some((m) => m.includes('ble_disconnected') && m.includes('errorCode:201')),
+    'y no se pierde diagnóstico: el código mapea 1:1 con la plantilla del mensaje',
+  );
+});
+
+test('§7.2: el monitor que muere con un `BleError` tampoco filtra el id', async () => {
+  const { d, seen } = await connected();
+  const logs = await withLogs(async () => {
+    d.emitMonitorError(bleError(300, `Services discovery failed for device ${DEV_ID}`));
+    await flush();
+  });
+  assert.ok(seen.statuses.includes('disconnected'));
+  const msgs = mensajes(logs);
+  assert.deepEqual(msgs.filter((m) => m.includes(DEV_ID)), []);
+  assert.ok(msgs.some((m) => m.includes('ble_monitor_lost') && m.includes('errorCode:300')));
+});
+
+test('§7.2: un error SIN código conocido pero CON la MAC adentro se blanquea, y la causa sobrevive', async () => {
+  // El camino que la tabla de códigos no cubre: un error cualquiera del puente cuyo texto trae la MAC.
+  const d = fakeDevice();
+  const m = fakeManager({
+    device: d.device,
+    livenessRejects: new Error(`gatt server for ${DEV_ID} is gone`),
+  });
+  const e = fakeEnv({ manager: m.manager });
+  const adapter = new BleGattAdapter(TEST_DRIVER, e.env);
+  const seen = track(adapter);
+  await adapter.connect(DEV_ID);
+  const logs = await withLogs(async () => {
+    e.state.resumeForeground();
+    await flush();
+  });
+  assert.ok(seen.statuses.includes('disconnected'), 'fail-closed intacto');
+  const msgs = mensajes(logs);
+  assert.deepEqual(msgs.filter((m2) => m2.includes(DEV_ID)), []);
+  assert.ok(
+    msgs.some((m2) => m2.includes('gatt server for <device> is gone')),
+    'se blanquea el identificador, NO el motivo',
+  );
+});
+
+test('§7.2 (la CLASE): en un flujo entero, ningún `message` lleva el id — pero el CAMPO sí puede', async () => {
+  // El barrido sobre la ausencia: no se listan los tres eventos que hoy interpolan, se exige que NINGUNO
+  // lo haga. Un camino de log nuevo que vuelva a interpolar el id cae acá aunque nadie lo agregue a una
+  // lista. La distinción que sí importa: `connect_superseded { deviceId }` lo lleva como CAMPO CON CLAVE,
+  // y eso es alcanzable por el scrubber key-based de `redact.ts` (`device_id` está en `PII_KEYS_RAW`).
+  const logs = await withLogs(async () => {
+    // (a) el SO reporta la desconexión con el error de la lib
+    const a = fakeDevice();
+    const ma = fakeManager({ device: a.device });
+    const ea = fakeEnv({ manager: ma.manager, timeouts: FAST_TIMEOUTS });
+    const adapterA = new BleGattAdapter(TEST_DRIVER, ea.env);
+    await adapterA.connect(DEV_ID);
+    a.emitDisconnected(DEV_ID, bleError(204, `Device ${DEV_ID} not found`));
+    await flush();
+
+    // (b) el monitor muere
+    const b = fakeDevice();
+    const mb = fakeManager({ device: b.device });
+    const eb = fakeEnv({ manager: mb.manager, timeouts: FAST_TIMEOUTS });
+    const adapterB = new BleGattAdapter(TEST_DRIVER, eb.env);
+    await adapterB.connect(DEV_ID);
+    b.emitMonitorError(bleError(201, `Device ${DEV_ID} was disconnected`));
+    await flush();
+
+    // (c) el escaneo falla (otra superficie, otro call site)
+    const mc = fakeManager({ scanListenerError: bleError(200, `Device ${OTHER_ID} connection failed`) });
+    const ec = fakeEnv({ manager: mc.manager, timeouts: FAST_TIMEOUTS });
+    await new BleGattAdapter(TEST_DRIVER, ec.env).connect();
+    await flush();
+  });
+  const msgs = mensajes(logs);
+  assert.ok(msgs.length >= 3, `el flujo tiene que dejar mensajes de las tres superficies (dejó ${msgs.length})`);
+  assert.deepEqual(
+    msgs.filter((m2) => m2.includes(DEV_ID) || m2.includes(OTHER_ID)),
+    [],
+    'ningún identificador de dispositivo en el free-text de ningún evento del flujo',
+  );
+});

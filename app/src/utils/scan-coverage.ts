@@ -66,19 +66,77 @@ export interface ScanCoverageOptions {
   /** EL BLANQUEO QUE USA EL GUARD — es lo que estamos auditando, no una copia. */
   strip: (src: string) => string;
   /**
-   * Archivos con retención/balance bajos LEGÍTIMOS (label → motivo escrito). Hoy: ninguno. Existe para
-   * que un fuente raro (un literal de regex con una llave suelta) no pueda bloquear la suite entera sin
-   * salida — no para tapar un blanqueo roto.
+   * ⚠️ **SOLO PARA EL TEST DE LA PROPIA ALLOWLIST** (`scan-coverage.test.ts`). Si viene, **REEMPLAZA** a
+   * `SCAN_COVERAGE_ALLOW` — es lo único que permite medir el mismo árbol CON la exención y SIN ella, que
+   * es la única forma de demostrar que la exención hace lo que dice.
+   *
+   * Ningún guard de producción la pasa, y **hay un guard que lo verifica** (`la puerta a la allowlist es
+   * UNA`): dos puertas a una allowlist es una allowlist sin freno, porque la segunda no la mira nadie.
    */
-  allow?: Record<string, string>;
+  allow?: ScanCoverageAllow;
 }
+
+/**
+ * Una exención declarada del chequeo (B). **Exime de UN chequeo, no del escaneo**: el archivo se sigue
+ * leyendo, blanqueando y midiendo, y el otro chequeo sigue corriendo sobre él. No existe "eximir un
+ * archivo" — eso sería devolverle al guard la ceguera que este módulo vino a cerrar.
+ */
+export interface ScanCoverageExemption {
+  /**
+   * `'retention'` → el archivo puede quedar por debajo del piso de retención (el BALANCE sigue corriendo).
+   * `'braces'`    → el archivo puede desbalancear llaves (la RETENCIÓN sigue corriendo). Reservado para el
+   *                 fuente raro que el escáner no puede leer bien (un literal con una llave suelta).
+   */
+  check: 'retention' | 'braces';
+  /**
+   * Por qué la anomalía es LEGÍTIMA — escrito **acá**, no un puntero a un informe. El guard de la
+   * allowlist exige que sea sustantivo: una entrada que dice "ver el análisis" es una entrada que nadie
+   * va a poder evaluar dentro de seis meses, y una allowlist que no se puede evaluar no se saca nunca.
+   */
+  why: string;
+}
+
+export type ScanCoverageAllow = Readonly<Record<string, ScanCoverageExemption>>;
+
+/**
+ * ── LA ALLOWLIST, ÚNICA Y COMPARTIDA ────────────────────────────────────────────────────────────────
+ * Clave = el `label` del archivo, que los **diez** guards que corren esta auto-verificación calculan
+ * igual (`relative(APP_ROOT, f)` con `/`), así que UNA entrada alcanza para los diez. Eso no es
+ * casualidad ni suerte: es el motivo por el que la lista vive acá y no en cada guard. Un archivo raro no
+ * tiene nada que ver con el predicado de `keyboard-avoiding` ni con el de `today-iso`, y hacer que cada
+ * guard declare su propia exención garantizaría que la novena copia se olvide.
+ *
+ * **El freno está en `scan-coverage.test.ts`**, y es lo que separa esto de una salida de emergencia para
+ * todos: cada entrada tiene que existir, traer su motivo escrito, estar GANADA contra el árbol real (si
+ * el archivo dejó de violar el chequeo, la entrada sobra y se pone roja), y la lista tiene un tope.
+ */
+export const SCAN_COVERAGE_ALLOW: ScanCoverageAllow = {
+  'src/services/ble/logging.ts': {
+    check: 'retention',
+    why:
+      'Es el CATÁLOGO de eventos de diagnóstico del transporte BLE, y ahí la prosa ES el artefacto: cada ' +
+      'miembro del union `TransportLogEvent` existe para que un síntoma en logcat se distinga de otro ' +
+      '("conectado y mudo" con el terminador equivocado vs. el bastón apagado vs. el socket muerto son el ' +
+      'MISMO silencio desde afuera), y el comentario de cada uno es lo que dice cuál es cuál y qué hacer. ' +
+      'Medido el 2026-08-17: 148 líneas no vacías → 34 de código (retención 0.230), o sea ya por debajo ' +
+      'del piso; lo único que lo salvaba era estar DOS líneas abajo del umbral de tamaño, así que agregar ' +
+      'dos miembros de una línea al union ponía en rojo a NUEVE guards que no tienen nada que ver con esta ' +
+      'unidad, con un mensaje sobre el blanqueo y a nueve guards de distancia del síntoma real (es el ' +
+      'incidente del 2026-08-06 que documenta `tap-target-collision-guard.test.ts`). NO es un blanqueo ' +
+      'roto: el escáner funciona bien y el balance de llaves de este archivo cierra en 0 — por eso la ' +
+      'exención es SOLO de la retención y el balance le sigue corriendo. La alternativa era purgar prosa ' +
+      'de otras unidades para satisfacer una heurística de cobertura, que es optimizar la métrica CONTRA ' +
+      'su propósito: el guard existe para que no se pierda entrada, y borrar documentación de diagnóstico ' +
+      'para bajar un ratio no le devuelve entrada a nadie.',
+  },
+};
 
 /**
  * Un archivo entra al chequeo de RETENCIÓN a partir de acá (líneas no en blanco). Los archivos chicos
  * quedan afuera a propósito: un util de 25 líneas con 20 de header docblock retiene 0.12 legítimamente
  * (medido: `services/ble/config.ts` = 0.120, `KeyboardAvoidingShell.android.tsx` = 0.092).
  */
-const BIG_FILE_LINES = 150;
+export const BIG_FILE_LINES = 150;
 
 /**
  * Piso de retención para los archivos grandes. Medido sobre el árbol real (364 archivos de
@@ -86,7 +144,7 @@ const BIG_FILE_LINES = 150;
  * (`utils/maneuver-applicability.ts`). El caso que tiene que poner rojo —1270 líneas que quedan en 200—
  * da 0.157. El piso va en el medio, más cerca del caso malo.
  */
-const MIN_RETAINED_RATIO = 0.25;
+export const MIN_RETAINED_RATIO = 0.25;
 
 const nonBlankLines = (src: string) => src.split(/\r?\n/).filter((l) => l.trim() !== '').length;
 
@@ -114,7 +172,7 @@ function braceDepth(code: string): { end: number; min: number } {
  * ("Dosis (opcional)", "ver §3)") y darían falsos positivos.
  */
 export function assertScanCoverage(opts: ScanCoverageOptions): void {
-  const allow = opts.allow ?? {};
+  const allow = opts.allow ?? SCAN_COVERAGE_ALLOW;
 
   // (A) ¿Cuántos archivos miré?
   if (opts.files.length < opts.minFiles) {
@@ -135,19 +193,23 @@ export function assertScanCoverage(opts: ScanCoverageOptions): void {
     // exento por herencia de `Object.prototype` — o sea, el guard se saltearía un archivo sin que nadie lo
     // haya declarado. Es improbable con paths, pero es exactamente la clase de omisión silenciosa que este
     // módulo existe para no repetir.
-    if (Object.prototype.hasOwnProperty.call(allow, label)) continue;
+    const exempt = Object.prototype.hasOwnProperty.call(allow, label) ? allow[label] : undefined;
+    // ⚠️ El archivo eximido NO se saltea: se lee, se blanquea y se mide igual, y el chequeo que la
+    // exención NO nombra sigue corriendo sobre él. Un `continue` acá —que es lo que había— convertía
+    // cualquier entrada en "este archivo deja de existir para el guard", que es justo la ceguera que este
+    // módulo cierra.
     const raw = opts.read(file);
     const stripped = opts.strip(raw);
 
     const before = nonBlankLines(raw);
     const after = nonBlankLines(stripped);
     const ratio = before === 0 ? 1 : after / before;
-    if (before >= BIG_FILE_LINES && ratio < MIN_RETAINED_RATIO) {
+    if (before >= BIG_FILE_LINES && ratio < MIN_RETAINED_RATIO && exempt?.check !== 'retention') {
       eaten.push(`${label}  ${before} líneas → ${after} (retiene ${ratio.toFixed(3)})`);
     }
 
     const { end, min } = braceDepth(stripSourceCommentsAndStrings(stripped));
-    if (end !== 0 || min < 0) {
+    if ((end !== 0 || min < 0) && exempt?.check !== 'braces') {
       unbalanced.push(`${label}  llaves: cierra en ${end}, mínimo ${min}`);
     }
   }

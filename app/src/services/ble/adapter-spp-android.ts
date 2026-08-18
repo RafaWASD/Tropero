@@ -87,6 +87,7 @@ import {
   type BluetoothPermissionOutcome,
 } from './permissions-android';
 import { logTransportEvent } from './logging';
+import { safeErrorText } from './error-text';
 
 // ── Superficie de `react-native-bluetooth-classic` que usamos (modelada localmente: la lib no se
 //    importa por tipo para no meterla en el grafo de módulos de web/CI) ────────────────────────
@@ -212,10 +213,12 @@ export function isSppNativeAvailable(): boolean {
 
 // ─── Helpers puros de este módulo ────────────────────────────────────────────────────────────
 
-function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return typeof e === 'string' ? e : 'unknown';
-}
+// ⚠️ ACÁ HABÍA UN `errorMessage(e)` PROPIO que devolvía `e.message` crudo. Los mensajes de
+// `react-native-bluetooth-classic` interpolan `device.getAddress()` ('Connection to %s failed.',
+// 'Connection to %s was lost', 'Not connected to %s' — `Exceptions.java`), o sea que ese string mandaba
+// LA MAC del bastón a los breadcrumbs, en free-text, donde el scrubber por claves no llega. Es la misma
+// clase que el §7.2 del Gate 2 del delta `ios-ble-mfi`, y acá existía desde ANTES del baseline. El
+// convertidor ahora es UNO —`safeErrorText` de `error-text.ts`—, con su guard sobre la ausencia.
 
 /** Compara direcciones MAC de forma tolerante: el SO las devuelve en minúscula, nosotros en mayúscula. */
 function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -277,9 +280,9 @@ async function requestBluetoothEnabledOnce(native: SppNative, ms: number): Promi
  * await se perdió es el `withTimeout` que lo envolvió, no el `catch` que lo recibe (que puede estar
  * varias líneas más abajo y cubrir más de una llamada).
  */
-function logBridgeFailure(label: string, ms: number, error: unknown): void {
+function logBridgeFailure(label: string, ms: number, error: unknown, deviceId?: string | null): void {
   if (isBridgeTimeout(error)) logTransportEvent({ kind: 'bridge_timeout', label: error.label, ms: error.ms });
-  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${errorMessage(error)}` });
+  else logTransportEvent({ kind: 'connect_error', message: `${label}: ${safeErrorText(error, deviceId)}` });
 }
 
 function timeoutOf(env: Pick<SppEnv, 'timeouts'>, key: keyof BridgeTimings): number {
@@ -980,7 +983,7 @@ export class SppAndroidAdapter implements StickAdapter {
       // El label es del TRAMO (este catch cubre desde el chequeo del Bluetooth hasta las
       // suscripciones); si el error fue un vencimiento, `logBridgeFailure` usa el label del await
       // que se perdió, que es más preciso que cualquier cosa que pueda decir acá.
-      logBridgeFailure('connect_path', this.ms('connect'), e);
+      logBridgeFailure('connect_path', this.ms('connect'), e, target);
       this.emitStatus('disconnected');
       this.scheduleReconnect();
     }
@@ -1100,7 +1103,7 @@ export class SppAndroidAdapter implements StickAdapter {
         'is_device_connected',
       );
     } catch (e) {
-      why = errorMessage(e);
+      why = safeErrorText(e, address);
     }
     // Mientras sondeábamos pudo pasar cualquier cosa (un disconnect, otro connect): no pisamos.
     if (this.closed || this.session !== session || this.inFlightGen != null) return;
